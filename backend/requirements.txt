@@ -1,0 +1,12 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.7
+email-validator>=2.0
+python-dotenv>=1.0
+SQLAlchemy>=2.0.36
+PyMySQL>=1.1
+aiomysql>=0.2
+bcrypt==4.0.1
+passlib>=1.7
+python-jose>=3.3

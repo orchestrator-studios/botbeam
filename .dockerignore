@@ -1,9 +1,0 @@
-node_modules
-.env
-.git
-.claude
-botbeam.log
-docs
-*.md
-frontend/node_modules
-frontend/dist
