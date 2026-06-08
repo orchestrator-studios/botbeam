@@ -88,3 +88,11 @@ if _dist.exists():
         if index.exists():
             return FileResponse(str(index))
         return JSONResponse({"detail": "Frontend not built"}, status_code=404)
+
+
+if __name__ == "__main__":
+    # Canonical run: `python main.py` → always BotBeam's port (4888), with reload.
+    # (Bare `uvicorn main:app` would default to 8000 and miss the frontend's API URL.)
+    import uvicorn
+
+    uvicorn.run("main:app", host="127.0.0.1", port=settings.PORT, reload=True)

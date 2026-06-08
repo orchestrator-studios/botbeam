@@ -2,10 +2,10 @@ import { useState, type FormEvent } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 
 function humanize(err: unknown): string {
-  const status = (err as { status?: number })?.status;
-  if (status === 401) return 'Invalid email or password.';
-  if (status === 409) return 'That email is already registered.';
-  if (status === 400) return 'Check your email, and use a password of 8+ characters.';
+  const e = err as { status?: number; detail?: string };
+  if (e?.detail) return e.detail;                 // the server's actual message
+  if (e?.status === 401) return 'Invalid email or password.';
+  if (e?.status === 409) return 'That email is already registered.';
   return 'Something went wrong. Try again.';
 }
 
@@ -47,10 +47,11 @@ export default function Auth() {
           />
           <input
             type="password"
-            placeholder="Password"
+            placeholder={mode === 'register' ? 'Password (8+ characters)' : 'Password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            minLength={8}
             required
           />
           {error && <div className="auth-error">{error}</div>}

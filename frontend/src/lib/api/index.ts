@@ -13,8 +13,25 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
     headers: withAuth(init?.headers as Record<string, string> | undefined),
   });
   if (!res.ok) {
-    const err = new Error(`${init?.method || 'GET'} ${url} failed: ${res.status}`) as Error & { status?: number };
+    // Surface the server's message: FastAPI returns {detail: string} or, for
+    // validation errors, {detail: [{msg, loc, ...}]}.
+    let detail: string | undefined;
+    try {
+      const data = await res.json();
+      const d = (data as { detail?: unknown }).detail;
+      if (typeof d === 'string') {
+        detail = d;
+      } else if (Array.isArray(d)) {
+        detail = d
+          .map((e) => (e && typeof e === 'object' && 'msg' in e ? (e as { msg: string }).msg : String(e)))
+          .join('; ');
+      }
+    } catch {
+      /* no JSON body */
+    }
+    const err = new Error(detail || `Request failed (${res.status})`) as Error & { status?: number; detail?: string };
     err.status = res.status;
+    err.detail = detail;
     throw err;
   }
   if (res.status === 204) return undefined as T;
