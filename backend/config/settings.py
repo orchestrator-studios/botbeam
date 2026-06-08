@@ -26,6 +26,13 @@ class Settings(BaseSettings):
 
     PORT: int = int(os.getenv("PORT", "4888"))
 
+    # Logging (mirrors the kh / table-that setup)
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_DIR: str = os.getenv("LOG_DIR", "logs")
+    LOG_FILENAME_PREFIX: str = "botbeam"
+    LOG_BACKUP_COUNT: int = 10
+    LOG_PERFORMANCE_THRESHOLD_MS: int = 1000
+
     @property
     def DATABASE_URL(self) -> str:
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"

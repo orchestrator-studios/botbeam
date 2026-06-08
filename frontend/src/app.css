@@ -1751,3 +1751,111 @@ table.content-table {
   .step-arrow { display: none; }
   .dropbox-sidebar { width: 220px; }
 }
+
+/* ── Auth (login / register) ── */
+.app-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 28px;
+  text-align: center;
+}
+
+.auth-card h1 {
+  color: var(--accent);
+  font-size: 1.6rem;
+  margin-bottom: 4px;
+}
+
+.auth-tagline {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 24px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+
+.auth-form input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.auth-form input:focus { border-color: var(--accent); }
+.auth-form input::placeholder { color: var(--text-muted); }
+.auth-form .btn { margin-top: 4px; width: 100%; justify-content: center; }
+
+.auth-error {
+  background: rgba(229, 115, 115, 0.12);
+  border: 1px solid #e57373;
+  color: #ef9a9a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
+.auth-switch {
+  margin-top: 18px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.auth-switch:hover { text-decoration: underline; }
+
+/* ── Home: account bar + connect-orchestra token panel ── */
+.home-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.home-account strong { color: var(--text); }
+
+.token-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 16px;
+}
+.token-panel h2 { font-size: 1.1rem; margin-bottom: 6px; }
+.token-panel p { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 14px; }
+.token-reveal { margin-top: 16px; }
+.token-reveal p { margin-bottom: 8px; }
+.token-reveal code { color: var(--accent); }

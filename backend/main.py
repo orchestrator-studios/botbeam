@@ -12,11 +12,16 @@ from database import init_async_db, AsyncSessionLocal
 from services.user_service import UserService
 from routers import auth as auth_router, devices as devices_router
 from websocket import manager
+from config.logging_config import setup_logging
+from middleware import LoggingMiddleware
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("botbeam")
+logger, _request_id_filter = setup_logging()
+logger.info("Logging configured (level=%s, dir=%s)", settings.LOG_LEVEL, settings.LOG_DIR)
 
 app = FastAPI(title=settings.APP_NAME, version=settings.VERSION)
+
+# Per-request logging (request id, timing, status-based levels).
+app.add_middleware(LoggingMiddleware, request_id_filter=_request_id_filter)
 
 # Bearer tokens (not cookies) → no credentialed CORS needed.
 app.add_middleware(
