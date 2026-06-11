@@ -4,6 +4,7 @@ import Home from './components/Home';
 import DeviceView from './components/DeviceView';
 import Auth from './components/Auth';
 import DebugPanel from './components/DebugPanel';
+import LockboxPanel from './components/LockboxPanel';
 
 function AppContent() {
   const { user, authChecked, activeTab } = useBotBeam();
@@ -17,6 +18,7 @@ function AppContent() {
       <div className="app-body">
         {activeTab === 'home' ? <Home /> : <DeviceView key={activeTab} deviceId={activeTab} />}
       </div>
+      <LockboxPanel />
       <DebugPanel />
     </div>
   );

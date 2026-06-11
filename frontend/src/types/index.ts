@@ -1,6 +1,10 @@
+export type DeviceKind = 'display' | 'lockbox';
+
 export interface Device {
   id: string;
   name: string;
+  description?: string | null;
+  kind?: DeviceKind;          // absent on older payloads → treat as 'display'
   isDefault: boolean;
   archivedAt: string | null;
   createdAt: string;

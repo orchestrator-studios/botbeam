@@ -51,12 +51,20 @@ class User(Base):
 
 
 class Device(Base):
-    """A display tab. Scoped directly to its owning user (no separate namespace).
+    """A user-owned entry in the key-value store. Scoped directly to its owner.
+
+    `kind` decides how it surfaces: 'display' entries are rendered live as tabs on
+    the user's screen; 'lockbox' entries are stashed — written by the user or their
+    agent in one context and retrieved in another — and listed separately rather
+    than rendered. Both share one lifecycle: beam content, read it, archive when done.
 
     Names are unique per user (case-insensitive via utf8mb4_unicode_ci) — the
     agent resolves user-spoken names against them, so they must be unambiguous.
     Each user has exactly one default display (is_default) that always exists
     and can't be renamed, archived, or deleted.
+
+    `description` is optional human-readable context — especially important for
+    lockboxes, which aren't rendered, so the listing needs a summary of the payload.
     """
     __tablename__ = "devices"
     __table_args__ = (
@@ -67,7 +75,9 @@ class Device(Base):
     id = Column(String(16), primary_key=True)              # public handle (the API/skill uses this)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
     name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)               # optional summary; key for lockboxes (not rendered)
     is_default = Column(Boolean, default=False, nullable=False)
+    kind = Column(String(16), default="display", nullable=False)  # 'display' (rendered tab) | 'lockbox' (stashed)
     archived_at = Column(DateTime, nullable=True)          # non-null = off the display, restorable
     content_type = Column(String(20), nullable=True)
     content_body = Column(LONGTEXT, nullable=True)

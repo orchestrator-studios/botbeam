@@ -257,6 +257,17 @@ body:has(.app) {
   margin-bottom: 16px;
 }
 
+.device-info-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.btn-sm {
+  padding: 3px 10px;
+  font-size: 0.8rem;
+}
+
 .device-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));

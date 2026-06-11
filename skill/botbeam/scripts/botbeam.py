@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""botbeam — beam content to your BotBeam displays over the authenticated REST API.
+"""botbeam — beam content to your BotBeam displays, or stash it in a lockbox,
+over the authenticated REST API.
 
 Creds: ~/.config/orchestra/botbeam.json  ->  {"base_url": "...", "token": "..."}
 (overridable via $BOTBEAM_CREDS / $BOTBEAM_BASE_URL / $BOTBEAM_TOKEN).
 Auth: sends `Authorization: Bearer <token>` (the agent token minted in the BotBeam UI).
 Stdlib only — no third-party deps.
+
+Model: one user-scoped key-value store of "devices". Each device is either a
+'display' (rendered as a live tab the user watches) or a 'lockbox' (stashed
+off-screen, retrieved on demand). Every user has one default display that always
+exists; beam with no --device targets it. Names are unique per user.
 """
 import argparse
 import json
@@ -15,6 +21,7 @@ import urllib.request
 from pathlib import Path
 
 CONTENT_TYPES = ["text", "markdown", "html", "url", "image", "list", "dashboard", "table"]
+KINDS = ["display", "lockbox"]
 
 
 def load_creds():
@@ -50,72 +57,123 @@ def api(method, path, body=None):
     except urllib.error.HTTPError as e:
         if e.code == 401:
             sys.exit("401 Unauthorized — token missing or expired. Re-mint it in the BotBeam UI.")
-        sys.exit(f"HTTP {e.code} on {method} {path}: {e.read().decode()[:300]}")
+        detail = e.read().decode()[:300]
+        if e.code == 409:
+            sys.exit(f"409 Name already in use: {detail}")
+        sys.exit(f"HTTP {e.code} on {method} {path}: {detail}")
     except urllib.error.URLError as e:
         sys.exit(f"Cannot reach BotBeam at {base}: {e.reason}")
 
 
-def _content(args):
+def _content(args, required):
     if args.type and args.body:
         return {"type": args.type, "body": args.body}
     if args.type or args.body:
         sys.exit("Provide both --type and --body together (or neither).")
+    if required:
+        sys.exit("This command needs content: pass both --type and --body.")
     return None
 
 
+def _print(obj):
+    print(json.dumps(obj, indent=2))
+
+
 def main():
-    p = argparse.ArgumentParser(prog="botbeam", description="Beam content to your BotBeam displays.")
+    p = argparse.ArgumentParser(
+        prog="botbeam", description="Beam content to your BotBeam displays, or stash it in a lockbox.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("list", help="List display tabs (id, name, current content).")
+    ls = sub.add_parser("list", help="List entries (id, name, kind, content).")
+    ls.add_argument("--kind", choices=KINDS, help="Filter to one kind.")
+    ls.add_argument("--archived", action="store_true", help="Show the archive instead of active entries.")
+    ls.add_argument("--summary", action="store_true", help="Omit content bodies (cheaper for scanning).")
 
-    b = sub.add_parser("beam", help="Create a new display tab, optionally with content.")
-    b.add_argument("--name", required=True)
-    b.add_argument("--type", choices=CONTENT_TYPES)
-    b.add_argument("--body")
+    bm = sub.add_parser("beam", help="Put content on the main display (or --device to update an existing entry).")
+    bm.add_argument("--device", help="Target an existing entry by id (default: the main display).")
+    bm.add_argument("--type", choices=CONTENT_TYPES, required=True)
+    bm.add_argument("--body", required=True)
 
-    u = sub.add_parser("update", help="Update a tab: push content and/or rename.")
-    u.add_argument("--device", required=True)
-    u.add_argument("--type", choices=CONTENT_TYPES)
-    u.add_argument("--body")
-    u.add_argument("--name")
+    nw = sub.add_parser("new", help="Create a new named entry, optionally with content.")
+    nw.add_argument("--name")
+    nw.add_argument("--description")
+    nw.add_argument("--kind", choices=KINDS, default="display")
+    nw.add_argument("--type", choices=CONTENT_TYPES)
+    nw.add_argument("--body")
 
-    c = sub.add_parser("clear", help="Clear a tab's content (keep the tab).")
-    c.add_argument("--device", required=True)
+    st = sub.add_parser("stash", help="Stash content in a new lockbox (shorthand for: new --kind lockbox).")
+    st.add_argument("--name")
+    st.add_argument("--description", help="Short summary of what's stashed (recommended — the lockbox isn't rendered).")
+    st.add_argument("--type", choices=CONTENT_TYPES, required=True)
+    st.add_argument("--body", required=True)
 
-    d = sub.add_parser("delete", help="Delete a tab.")
-    d.add_argument("--device", required=True)
+    cl = sub.add_parser("clear", help="Clear an entry's content, keep the entry. Default: the main display.")
+    cl.add_argument("--device")
 
-    sub.add_parser("reset", help="Delete ALL tabs.")
+    rn = sub.add_parser("rename", help="Rename an entry.")
+    rn.add_argument("--device", required=True)
+    rn.add_argument("--name", required=True)
+
+    ar = sub.add_parser("archive", help="Archive an entry (off the display, restorable).")
+    ar.add_argument("--device", required=True)
+
+    un = sub.add_parser("unarchive", help="Restore an archived entry.")
+    un.add_argument("--device", required=True)
+
+    dl = sub.add_parser("delete", help="Delete an entry.")
+    dl.add_argument("--device", required=True)
+
+    sub.add_parser("reset", help="Delete ALL entries (the default display survives, cleared).")
 
     args = p.parse_args()
 
     if args.cmd == "list":
-        print(json.dumps(api("GET", "/api/devices"), indent=2))
+        q = []
+        if args.kind:
+            q.append(f"kind={args.kind}")
+        if args.archived:
+            q.append("archived=true")
+        if args.summary:
+            q.append("view=summary")
+        _print(api("GET", "/api/devices" + (("?" + "&".join(q)) if q else "")))
+
     elif args.cmd == "beam":
-        body = {"name": args.name}
-        content = _content(args)
+        content = {"type": args.type, "body": args.body}
+        path = f"/api/devices/{args.device}/content" if args.device else "/api/devices/default/content"
+        _print(api("PUT", path, content))
+
+    elif args.cmd == "new":
+        body = {"name": args.name, "kind": args.kind, "description": args.description}
+        content = _content(args, required=False)
         if content:
             body["content"] = content
-        print(json.dumps(api("POST", "/api/devices", body), indent=2))
-    elif args.cmd == "update":
-        body = {}
-        if args.name:
-            body["name"] = args.name
-        content = _content(args)
-        if content:
-            body["content"] = content
-        if not body:
-            sys.exit("Nothing to update — pass --name and/or --type with --body.")
-        print(json.dumps(api("PATCH", f"/api/devices/{args.device}", body), indent=2))
+        _print(api("POST", "/api/devices", body))
+
+    elif args.cmd == "stash":
+        body = {"name": args.name, "kind": "lockbox", "description": args.description,
+                "content": {"type": args.type, "body": args.body}}
+        _print(api("POST", "/api/devices", body))
+
     elif args.cmd == "clear":
-        print(json.dumps(api("PATCH", f"/api/devices/{args.device}", {"content": None}), indent=2))
+        path = f"/api/devices/{args.device}/content" if args.device else "/api/devices/default/content"
+        _print(api("DELETE", path))
+
+    elif args.cmd == "rename":
+        _print(api("PATCH", f"/api/devices/{args.device}", {"name": args.name}))
+
+    elif args.cmd == "archive":
+        _print(api("POST", f"/api/devices/{args.device}/archive"))
+
+    elif args.cmd == "unarchive":
+        _print(api("POST", f"/api/devices/{args.device}/unarchive"))
+
     elif args.cmd == "delete":
         api("DELETE", f"/api/devices/{args.device}")
         print(f"Deleted {args.device}")
+
     elif args.cmd == "reset":
         api("DELETE", "/api/devices")
-        print("All tabs cleared.")
+        print("All entries cleared (default display kept).")
 
 
 if __name__ == "__main__":

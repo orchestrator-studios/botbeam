@@ -80,6 +80,12 @@ async def _migrate_devices(conn) -> None:
         ))
     if "archived_at" not in cols:
         await conn.execute(text("ALTER TABLE devices ADD COLUMN archived_at DATETIME NULL"))
+    if "description" not in cols:
+        await conn.execute(text("ALTER TABLE devices ADD COLUMN description TEXT NULL"))
+    if "kind" not in cols:
+        await conn.execute(text(
+            "ALTER TABLE devices ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'display'"
+        ))
 
     indexes = {
         row[0] for row in (await conn.execute(text(

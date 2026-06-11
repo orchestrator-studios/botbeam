@@ -12,6 +12,20 @@ export const TYPE_META: Record<ContentType, { label: string; color: string }> = 
   json:      { label: 'JSON',      color: '#ffcc80' },
 };
 
+// File extension + MIME for "download to disk". url/image bodies are URL
+// strings, so they save as plain text (.txt) for now.
+export function downloadMeta(type: ContentType): { ext: string; mime: string } {
+  switch (type) {
+    case 'markdown': return { ext: 'md', mime: 'text/markdown' };
+    case 'html': return { ext: 'html', mime: 'text/html' };
+    case 'list':
+    case 'dashboard':
+    case 'table':
+    case 'json': return { ext: 'json', mime: 'application/json' };
+    default: return { ext: 'txt', mime: 'text/plain' }; // text, url, image
+  }
+}
+
 export function contentDetail(content: Content): string | null {
   switch (content.type) {
     case 'url':

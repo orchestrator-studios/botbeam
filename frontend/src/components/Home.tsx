@@ -7,7 +7,7 @@ import type { Device } from '../types';
 import DeviceCard from './DeviceCard';
 
 export default function Home() {
-  const { devices, switchTab, user, logout, unarchiveDevice } = useBotBeam();
+  const { devices, displays, switchTab, user, logout, unarchiveDevice } = useBotBeam();
   const [newToken, setNewToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [archived, setArchived] = useState<Device[]>([]);
@@ -56,9 +56,9 @@ export default function Home() {
           <button className="btn btn-ghost" onClick={logout}>Sign out</button>
         </div>
 
-        {devices.length > 0 && (
+        {displays.length > 0 && (
           <div className="device-grid">
-            {devices.map((d) => (
+            {displays.map((d) => (
               <DeviceCard key={d.id} device={d} onClick={() => switchTab(d.id)} />
             ))}
           </div>

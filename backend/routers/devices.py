@@ -27,12 +27,16 @@ def _svc(db: AsyncSession) -> DeviceService:
 
 @router.get("/devices")
 async def list_devices(
-    archived: bool = False, view: str = "full",
+    archived: bool = False, view: str = "full", kind: str | None = None,
     user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
 ):
     if view not in ("full", "summary"):
         raise HTTPException(status_code=400, detail='view must be "full" or "summary"')
-    return await _svc(db).list(user.user_id, archived=archived, summary=(view == "summary"))
+    if kind is not None and kind not in ("display", "lockbox"):
+        raise HTTPException(status_code=400, detail='kind must be "display" or "lockbox"')
+    return await _svc(db).list(
+        user.user_id, archived=archived, summary=(view == "summary"), kind=kind,
+    )
 
 
 @router.get("/devices/{device_id}")
@@ -60,7 +64,9 @@ async def beam_default(body: Content, user=Depends(get_current_user), db: AsyncS
 async def beam_new(body: DeviceCreate, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     content = body.content.model_dump() if body.content else None
     try:
-        dev = await _svc(db).beam_new(user.user_id, body.name, content)
+        dev = await _svc(db).beam_new(
+            user.user_id, body.name, content, kind=body.kind, description=body.description,
+        )
     except NameConflict as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ContentError as e:

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 
 export default function TabBar() {
-  const { devices, activeTab, switchTab, removeDevice, archiveDevice, resetDevices, addDevice, connected, pulsingTab, version } = useBotBeam();
+  const { displays, activeTab, switchTab, removeDevice, archiveDevice, resetDevices, addDevice, connected, pulsingTab, version } = useBotBeam();
   const [showModal, setShowModal] = useState(false);
   const [closeTarget, setCloseTarget] = useState<{ id: string; name: string } | null>(null);
   const [showReset, setShowReset] = useState(false);
@@ -55,7 +55,7 @@ export default function TabBar() {
           Home
         </button>
 
-        {devices.map(d => (
+        {displays.map(d => (
           <button
             key={d.id}
             className={`tab ${activeTab === d.id ? 'active' : ''} ${pulsingTab === d.id ? 'tab-pulse' : ''}`}
@@ -78,7 +78,7 @@ export default function TabBar() {
         ))}
 
         <button className="tab tab-add" onClick={() => setShowModal(true)}>+</button>
-        {devices.some(d => !d.isDefault) && (
+        {displays.some(d => !d.isDefault) && (
           <button className="tab tab-reset" title="Reset all tabs" onClick={() => setShowReset(true)}>
             Reset
           </button>

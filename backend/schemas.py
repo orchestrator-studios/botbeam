@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -49,8 +49,11 @@ class Content(BaseModel):
 
 
 class DeviceCreate(BaseModel):
-    """beam-new: name optional (server generates one), content optional (empty tab)."""
+    """beam-new: name optional (server generates one), content optional (empty tab).
+    kind 'lockbox' stashes the entry off-screen; 'display' (default) renders a tab."""
     name: Optional[str] = None
+    description: Optional[str] = None
+    kind: Literal["display", "lockbox"] = "display"
     content: Optional[Content] = None
 
 

@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 import ContentRenderer from './ContentRenderer';
-import { TYPE_META, contentDetail } from '../lib/contentMeta';
+import { TYPE_META, contentDetail, downloadMeta } from '../lib/contentMeta';
 
 interface Props {
   deviceId: string;
@@ -10,6 +11,30 @@ export default function DeviceView({ deviceId }: Props) {
   const { devices } = useBotBeam();
   const device = devices.find(d => d.id === deviceId);
   const content = device?.content ?? null;
+  const [copied, setCopied] = useState(false);
+
+  function copyBody() {
+    if (!content) return;
+    navigator.clipboard.writeText(content.body).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  function downloadBody() {
+    if (!content) return;
+    const { ext, mime } = downloadMeta(content.type);
+    const safe = (device?.name || 'beam').replace(/[^\w.-]+/g, '_');
+    const blob = new Blob([content.body], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safe}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
   if (!content) {
     return (
@@ -32,6 +57,14 @@ export default function DeviceView({ deviceId }: Props) {
           {meta.label}
         </span>
         {detail && <span className="meta-detail">{detail}</span>}
+        <span className="device-info-actions">
+          <button className="btn btn-ghost btn-sm" onClick={copyBody} title="Copy content to clipboard">
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={downloadBody} title="Download content to disk">
+            Download
+          </button>
+        </span>
       </div>
       <ContentRenderer content={content} />
     </div>

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import Device
 
 VALID_CONTENT_TYPES = {"text", "html", "url", "image", "markdown", "dashboard", "list", "table"}
+VALID_KINDS = {"display", "lockbox"}
 MAX_BODY_BYTES = 512 * 1024  # 500KB
 DEFAULT_DEVICE_NAME = "Main"
 _ALPHABET = string.ascii_letters + string.digits
@@ -83,6 +84,8 @@ def serialize(d: Device) -> dict:
     return {
         "id": d.id,
         "name": d.name,
+        "description": d.description,
+        "kind": d.kind,
         "isDefault": bool(d.is_default),
         "archivedAt": _iso(d.archived_at),
         "createdAt": _iso(d.created_at),
@@ -95,6 +98,8 @@ def summarize(d: Device) -> dict:
     return {
         "id": d.id,
         "name": d.name,
+        "description": d.description,
+        "kind": d.kind,
         "isDefault": bool(d.is_default),
         "archivedAt": _iso(d.archived_at),
         "contentType": d.content_type,
@@ -109,15 +114,22 @@ class DeviceService:
 
     # ── reads ──
 
-    async def list(self, user_id: int, archived: bool = False, summary: bool = False) -> list[dict]:
-        """Active tabs (default first) or, with archived=True, the archive."""
+    async def list(
+        self, user_id: int, archived: bool = False, summary: bool = False,
+        kind: Optional[str] = None,
+    ) -> list[dict]:
+        """Active entries (default first) or, with archived=True, the archive.
+        Optionally filter to one kind ('display' tabs or 'lockbox' stashes)."""
         if not archived:
             await self.get_or_create_default(user_id)
-        cond = Device.archived_at.isnot(None) if archived else Device.archived_at.is_(None)
+        conds = [
+            Device.user_id == user_id,
+            Device.archived_at.isnot(None) if archived else Device.archived_at.is_(None),
+        ]
+        if kind is not None:
+            conds.append(Device.kind == kind)
         res = await self.db.execute(
-            select(Device)
-            .where(Device.user_id == user_id, cond)
-            .order_by(Device.is_default.desc(), Device.created_at)
+            select(Device).where(*conds).order_by(Device.is_default.desc(), Device.created_at)
         )
         shape = summarize if summary else serialize
         return [shape(d) for d in res.scalars().all()]
@@ -169,12 +181,19 @@ class DeviceService:
         await self._set_content(d, content)
         return serialize(d), created
 
-    async def beam_new(self, user_id: int, name: Optional[str], content: Optional[dict]) -> dict:
-        """Create a named tab (name generated if omitted). NameConflict if taken."""
+    async def beam_new(
+        self, user_id: int, name: Optional[str], content: Optional[dict],
+        *, kind: str = "display", description: Optional[str] = None,
+    ) -> dict:
+        """Create a named entry (name generated if omitted). NameConflict if taken.
+        kind 'lockbox' stashes it off the display; 'display' renders a tab."""
+        if kind not in VALID_KINDS:
+            raise ContentError(f'Invalid kind "{kind}". Must be one of: {", ".join(sorted(VALID_KINDS))}')
         if name is not None and (not isinstance(name, str) or not name.strip()):
             raise ContentError("Device name must be a non-empty string")
         name = name.strip() if name else await self._free_name(user_id)
-        d = Device(id=_gen_id(), user_id=user_id, name=name)
+        d = Device(id=_gen_id(), user_id=user_id, name=name, kind=kind,
+                   description=description.strip() if description else None)
         if content:
             d.content_type = content["type"]
             d.content_body = validate_content(content["type"], content.get("body"))

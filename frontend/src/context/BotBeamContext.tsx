@@ -14,6 +14,8 @@ interface BotBeamContextType {
   user: string | null;
   authChecked: boolean;
   devices: Device[];
+  displays: Device[];
+  lockboxes: Device[];
   activeTab: string;
   wsLog: LogEntry[];
   showDebug: boolean;
@@ -183,13 +185,18 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
           case 'device_created':
             setDevices((prev) => prev.some((d) => d.id === msg.device.id)
               ? prev : sortDevices([...prev, msg.device]));
-            setActiveTab(msg.device.id);
-            pulse(msg.device.id);
+            // Lockboxes are stashes — they land in the panel, not the screen.
+            if (msg.device.kind !== 'lockbox') {
+              setActiveTab(msg.device.id);
+              pulse(msg.device.id);
+            }
             break;
           case 'device_updated':
             setDevices((prev) => prev.map((d) => d.id === msg.device.id ? msg.device : d));
-            setActiveTab(msg.device.id);
-            pulse(msg.device.id);
+            if (msg.device.kind !== 'lockbox') {
+              setActiveTab(msg.device.id);
+              pulse(msg.device.id);
+            }
             break;
           case 'device_unarchived':
             setDevices((prev) => prev.some((d) => d.id === msg.device.id)
@@ -253,10 +260,15 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, []);
 
+  const displays = devices.filter((d) => d.kind !== 'lockbox');
+  const lockboxes = devices.filter((d) => d.kind === 'lockbox');
+
   const value: BotBeamContextType = {
     user,
     authChecked,
     devices,
+    displays,
+    lockboxes,
     activeTab,
     wsLog,
     showDebug,
