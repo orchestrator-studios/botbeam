@@ -1,0 +1,9 @@
+# Never bake local secrets or junk into the image
+backend/.env
+backend/venv/
+backend/logs/
+**/__pycache__/
+frontend/node_modules/
+frontend/dist/
+.git/
+copilot/

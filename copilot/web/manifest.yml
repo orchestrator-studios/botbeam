@@ -1,0 +1,39 @@
+# BotBeam web service — FastAPI backend + built React frontend in one container.
+# Same Copilot app/env/service as the old Node (signal) deployment; only the
+# image contents changed. Port 4888, /health, and ALB stickiness (WebSocket
+# affinity) are carried over unchanged.
+name: web
+type: Load Balanced Web Service
+
+http:
+  path: '/'
+  healthcheck:
+    path: '/health'
+    interval: 30s
+    timeout: 5s
+    healthy_threshold: 2
+    unhealthy_threshold: 3
+  stickiness: true
+
+image:
+  build: Dockerfile
+  port: 4888
+
+cpu: 256
+memory: 512
+platform: linux/amd64
+count: 1
+
+variables:
+  PORT: 4888
+  DB_HOST: chatter.c0guz2wkpcod.us-east-2.rds.amazonaws.com
+  DB_USER: admin
+  DB_NAME: botbeam
+
+secrets:
+  DB_PASSWORD: /copilot/botbeam/prod/secrets/db_password
+  JWT_SECRET_KEY: /copilot/botbeam/prod/secrets/jwt_secret_key
+
+network:
+  vpc:
+    placement: public

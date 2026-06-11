@@ -3,6 +3,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import pymysql
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 
 from config.settings import settings
 from models import Base
@@ -29,10 +30,14 @@ def _to_async_url(url: str) -> str:
     return url
 
 
+# NullPool: a fresh connection per checkout instead of a held pool. Idle pooled
+# aiomysql connections die (transport closed) and then 500 every request that
+# draws them — under uvloop the failure is a RuntimeError, which escapes
+# pool_pre_ping's recycle logic entirely. Connecting to same-region RDS costs a
+# few ms; this app's traffic doesn't justify a pool.
 async_engine = create_async_engine(
     _to_async_url(settings.DATABASE_URL),
-    pool_pre_ping=True,
-    pool_recycle=1800,
+    poolclass=NullPool,
     echo=False,
 )
 
