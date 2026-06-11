@@ -1,4 +1,4 @@
-from typing import Optional, Literal
+from typing import Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -40,22 +40,3 @@ class AgentToken(BaseModel):
     access_token: str
     token_type: str = "bearer"
     name: str
-
-
-# ── Devices ──
-class Content(BaseModel):
-    type: str
-    body: str
-
-
-class DeviceCreate(BaseModel):
-    """beam-new: name optional (server generates one), content optional (empty tab).
-    kind 'lockbox' stashes the entry off-screen; 'display' (default) renders a tab."""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    kind: Literal["display", "lockbox"] = "display"
-    content: Optional[Content] = None
-
-
-class RenameRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=255)

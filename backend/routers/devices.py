@@ -7,16 +7,38 @@ Three beams, three endpoints, distinct failure modes:
 `default` is a reserved path segment — device ids are 8 alphanumerics, no collision.
 Every mutation broadcasts to the owner's WebSocket channel.
 """
+from typing import Optional, Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_async_db
-from schemas import Content, DeviceCreate, RenameRequest
 from services.auth_service import get_current_user
 from services.device_service import (
     DeviceService, ContentError, NameConflict, DefaultDeviceError,
 )
 from websocket import manager
+
+
+# ── request payloads (specific to these endpoints, not domain objects) ──
+class Content(BaseModel):
+    type: str
+    body: str
+
+
+class DeviceCreate(BaseModel):
+    """beam-new: name optional (server generates one), content optional (empty tab).
+    kind 'lockbox' stashes the entry off-screen; 'display' (default) renders a tab."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    kind: Literal["display", "lockbox"] = "display"
+    content: Optional[Content] = None
+
+
+class RenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
 
 router = APIRouter()
 
