@@ -58,5 +58,7 @@ def setup_logging():
 
     # Uvicorn's own access log duplicates ours — quiet it.
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    # watchfiles logs every filesystem change ("N changes detected") — noisy. Quiet it.
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
 
     return logging.getLogger("botbeam"), _request_id_filter
