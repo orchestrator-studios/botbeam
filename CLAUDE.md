@@ -17,6 +17,7 @@ Virtual display & beam surface for **orchestra**. **FastAPI + async SQLAlchemy (
 - `backend/services/device_service.py` — the three beams (`beam_default` / `beam_new` 409-on-dup / `beam_existing` 404-on-miss) + clear/rename/archive/unarchive/delete/reset + content validation (9 content types, 500 KB cap — the canonical list is `ContentType` in `backend/schemas.py`). Agents address the default display via the reserved `default` path segment; `list?view=summary` returns no bodies.
 - `backend/routers/auth.py` → `/auth/*` · `backend/routers/devices.py` → `/api/devices`.
 - `backend/websocket.py` — per-user WS channels for live updates.
+- `backend/config/logging_config.py` + `backend/middleware/logging_middleware.py` — house logging (kh / table-that pattern): console + daily-rotating file (`LOG_FORMAT=json` for structured file logs), per-request id via ContextVar, timing with SLOW/4xx/5xx levels. Modules log under `botbeam.*` loggers; routers/services log sparsely — security events (login failures, agent tokens) and state changes at info, per-beam content writes at debug.
 
 ## Auth model
 One credential: a JWT bearer. The browser keeps it in `localStorage`; the agent (orchestra `botbeam` skill) keeps a long-lived one in `~/.config/orchestra/botbeam.json`. Devices are scoped to the authenticated user. **No secrets in the repo.**
