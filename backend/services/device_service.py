@@ -7,19 +7,23 @@ beam_new (create, name must be free), beam_existing (replace content by id).
 Names are unique per user; the agent resolves spoken names to ids via list().
 """
 import json
+import logging
 import secrets
 import string
 from datetime import datetime
-from typing import Optional
+from typing import Optional, get_args
 
 from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Device
+from schemas import ContentType, DeviceKind
 
-VALID_CONTENT_TYPES = {"text", "html", "url", "image", "markdown", "dashboard", "list", "table"}
-VALID_KINDS = {"display", "lockbox"}
+logger = logging.getLogger("botbeam.devices")
+
+VALID_CONTENT_TYPES = set(get_args(ContentType))
+VALID_KINDS = set(get_args(DeviceKind))
 MAX_BODY_BYTES = 512 * 1024  # 500KB
 DEFAULT_DEVICE_NAME = "Main"
 _ALPHABET = string.ascii_letters + string.digits
@@ -171,6 +175,7 @@ class DeviceService:
             self.db.add(d)
             await self.db.commit()
         await self.db.refresh(d)
+        logger.info("Default display created (user=%s, id=%s)", user_id, d.id)
         return d, True
 
     # ── the three beams ──
@@ -205,6 +210,7 @@ class DeviceService:
             await self.db.rollback()
             raise NameConflict(f'A tab named "{name}" already exists')
         await self.db.refresh(d)
+        logger.info("Device created (user=%s, id=%s, kind=%s, name=%r)", user_id, d.id, kind, name)
         return serialize(d)
 
     async def beam_existing(self, user_id: int, device_id: str, content: dict) -> Optional[tuple[dict, bool]]:
@@ -231,6 +237,11 @@ class DeviceService:
             d.content_updated_at = datetime.utcnow()
         await self.db.commit()
         await self.db.refresh(d)
+        if content is None:
+            logger.debug("Content cleared (device=%s)", d.id)
+        else:
+            logger.debug("Content set (device=%s, type=%s, bytes=%d)",
+                         d.id, d.content_type, len(d.content_body.encode("utf-8")))
 
     async def _free_name(self, user_id: int) -> str:
         res = await self.db.execute(select(Device.name).where(Device.user_id == user_id))
@@ -300,15 +311,17 @@ class DeviceService:
             raise DefaultDeviceError("The default display can't be deleted — clear it instead")
         await self.db.delete(d)
         await self.db.commit()
+        logger.info("Device deleted (user=%s, id=%s)", user_id, device_id)
         return True
 
     async def reset(self, user_id: int) -> Optional[dict]:
         """Delete every tab (including archived); the default survives, cleared.
         Returns the surviving default display."""
-        await self.db.execute(
+        res = await self.db.execute(
             delete(Device).where(Device.user_id == user_id, Device.is_default.is_(False))
         )
         await self.db.commit()
+        logger.info("Devices reset (user=%s, deleted=%d)", user_id, res.rowcount)
         d, _ = await self.get_or_create_default(user_id)
         await self._set_content(d, None)
         return serialize(d)

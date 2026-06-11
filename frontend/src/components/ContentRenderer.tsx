@@ -1,10 +1,10 @@
 import { useState, useCallback, useMemo } from 'react';
 import { marked } from 'marked';
-import type { Content, DashboardCard, ListItem, TableData } from '../types';
+import type { DeviceContent, DashboardCard, ListItem, TableData } from '../types';
 import { useBotBeam } from '../context/BotBeamContext';
 
 interface Props {
-  content: Content;
+  content: DeviceContent;
 }
 
 function UrlEmbed({ url }: { url: string }) {

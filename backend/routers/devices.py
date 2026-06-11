@@ -7,13 +7,14 @@ Three beams, three endpoints, distinct failure modes:
 `default` is a reserved path segment — device ids are 8 alphanumerics, no collision.
 Every mutation broadcasts to the owner's WebSocket channel.
 """
-from typing import Optional, Literal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_async_db
+from schemas import Device, DeviceKind, DeviceSummary
 from services.auth_service import get_current_user
 from services.device_service import (
     DeviceService, ContentError, NameConflict, DefaultDeviceError,
@@ -32,7 +33,7 @@ class DeviceCreate(BaseModel):
     kind 'lockbox' stashes the entry off-screen; 'display' (default) renders a tab."""
     name: Optional[str] = None
     description: Optional[str] = None
-    kind: Literal["display", "lockbox"] = "display"
+    kind: DeviceKind = "display"
     content: Optional[Content] = None
 
 
@@ -47,7 +48,7 @@ def _svc(db: AsyncSession) -> DeviceService:
     return DeviceService(db)
 
 
-@router.get("/devices")
+@router.get("/devices", response_model=list[Device] | list[DeviceSummary])
 async def list_devices(
     archived: bool = False, view: str = "full", kind: str | None = None,
     user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
@@ -61,7 +62,7 @@ async def list_devices(
     )
 
 
-@router.get("/devices/{device_id}")
+@router.get("/devices/{device_id}", response_model=Device)
 async def get_device(device_id: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     dev = await _svc(db).get(user.user_id, device_id)
     if not dev:
@@ -71,7 +72,7 @@ async def get_device(device_id: str, user=Depends(get_current_user), db: AsyncSe
 
 # ── the three beams ──
 
-@router.put("/devices/default/content")
+@router.put("/devices/default/content", response_model=Device)
 async def beam_default(body: Content, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     try:
         dev, created = await _svc(db).beam_default(user.user_id, body.model_dump())
@@ -82,7 +83,7 @@ async def beam_default(body: Content, user=Depends(get_current_user), db: AsyncS
     return dev
 
 
-@router.post("/devices", status_code=201)
+@router.post("/devices", status_code=201, response_model=Device)
 async def beam_new(body: DeviceCreate, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     content = body.content.model_dump() if body.content else None
     try:
@@ -97,7 +98,7 @@ async def beam_new(body: DeviceCreate, user=Depends(get_current_user), db: Async
     return dev
 
 
-@router.put("/devices/{device_id}/content")
+@router.put("/devices/{device_id}/content", response_model=Device)
 async def beam_existing(
     device_id: str, body: Content,
     user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
@@ -117,14 +118,14 @@ async def beam_existing(
 
 # ── housekeeping ──
 
-@router.delete("/devices/default/content")
+@router.delete("/devices/default/content", response_model=Device)
 async def clear_default(user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     dev = await _svc(db).clear(user.user_id, None)
     await manager.broadcast(user.user_id, {"event": "device_updated", "device": dev})
     return dev
 
 
-@router.delete("/devices/{device_id}/content")
+@router.delete("/devices/{device_id}/content", response_model=Device)
 async def clear_device(device_id: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     dev = await _svc(db).clear(user.user_id, device_id)
     if not dev:
@@ -133,7 +134,7 @@ async def clear_device(device_id: str, user=Depends(get_current_user), db: Async
     return dev
 
 
-@router.patch("/devices/{device_id}")
+@router.patch("/devices/{device_id}", response_model=Device)
 async def rename_device(
     device_id: str, body: RenameRequest,
     user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
@@ -152,7 +153,7 @@ async def rename_device(
     return dev
 
 
-@router.post("/devices/{device_id}/archive")
+@router.post("/devices/{device_id}/archive", response_model=Device)
 async def archive_device(device_id: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     try:
         dev = await _svc(db).archive(user.user_id, device_id)
@@ -164,7 +165,7 @@ async def archive_device(device_id: str, user=Depends(get_current_user), db: Asy
     return dev
 
 
-@router.post("/devices/{device_id}/unarchive")
+@router.post("/devices/{device_id}/unarchive", response_model=Device)
 async def unarchive_device(device_id: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     dev = await _svc(db).unarchive(user.user_id, device_id)
     if not dev:

@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-CONTENT_TYPES = ["text", "markdown", "html", "url", "image", "list", "dashboard", "table"]
+CONTENT_TYPES = ["text", "markdown", "html", "url", "image", "list", "dashboard", "table", "json"]
 KINDS = ["display", "lockbox"]
 
 

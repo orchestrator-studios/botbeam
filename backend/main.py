@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -15,13 +14,14 @@ from websocket import manager
 from config.logging_config import setup_logging
 from middleware import LoggingMiddleware
 
-logger, _request_id_filter = setup_logging()
-logger.info("Logging configured (level=%s, dir=%s)", settings.LOG_LEVEL, settings.LOG_DIR)
+logger = setup_logging()
+logger.info("Logging configured (level=%s, format=%s, dir=%s)",
+            settings.LOG_LEVEL, settings.LOG_FORMAT, settings.LOG_DIR)
 
 app = FastAPI(title=settings.APP_NAME, version=settings.VERSION)
 
 # Per-request logging (request id, timing, status-based levels).
-app.add_middleware(LoggingMiddleware, request_id_filter=_request_id_filter)
+app.add_middleware(LoggingMiddleware)
 
 # Bearer tokens (not cookies) → no credentialed CORS needed.
 app.add_middleware(

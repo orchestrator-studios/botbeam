@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { Device, Content, DashboardCard, ListItem, TableData } from '../types';
+import type { Device, DeviceContent, DashboardCard, ListItem, TableData } from '../types';
 import { TYPE_META, contentDetail } from '../lib/contentMeta';
 
 interface Props {
@@ -13,7 +13,7 @@ function escapeHtml(str: string) {
   return div.innerHTML;
 }
 
-function Preview({ content }: { content: Content }) {
+function Preview({ content }: { content: DeviceContent }) {
   switch (content.type) {
     case 'text':
       return <div className="preview-text">{content.body}</div>;

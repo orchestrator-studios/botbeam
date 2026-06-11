@@ -1,4 +1,5 @@
 """User + organization operations. Mirrors the kh / table-that UserService."""
+import logging
 from typing import Optional
 
 from sqlalchemy import select
@@ -6,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 
 from models import User, Organization, UserRole
+
+logger = logging.getLogger("botbeam.users")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 DEFAULT_ORG_NAME = "Default Organization"
@@ -32,6 +35,7 @@ class UserService:
         self.db.add(org)
         await self.db.commit()
         await self.db.refresh(org)
+        logger.info("Default org created (org_id=%s)", org.org_id)
         return org
 
     async def create_user(

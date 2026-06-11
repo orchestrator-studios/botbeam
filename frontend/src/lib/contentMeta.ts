@@ -1,4 +1,4 @@
-import type { Content, ContentType, TableData } from '../types';
+import type { DeviceContent, ContentType, TableData } from '../types';
 
 export const TYPE_META: Record<ContentType, { label: string; color: string }> = {
   text:      { label: 'Text',      color: '#888' },
@@ -26,7 +26,7 @@ export function downloadMeta(type: ContentType): { ext: string; mime: string } {
   }
 }
 
-export function contentDetail(content: Content): string | null {
+export function contentDetail(content: DeviceContent): string | null {
   switch (content.type) {
     case 'url':
     case 'image': {

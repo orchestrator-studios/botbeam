@@ -11,9 +11,10 @@ Virtual display & beam surface for **orchestra**. **FastAPI + async SQLAlchemy (
 - `backend/config/settings.py` — env-driven settings (DB, JWT).
 - `backend/database.py` — async engine/session (`mysql+aiomysql`), `get_async_db`, `init_async_db`.
 - `backend/models.py` — `Organization`, `User` (int PK, `userrole` enum), `Device` (a user-scoped display tab; names unique per user, one undeletable default display per user, archivable).
+- `backend/schemas.py` — domain objects only (`User`, `Device`, `DeviceContent`, `DeviceSummary`, `DeviceKind`/`ContentType` Literals); mirrors `frontend/src/types/index.ts` name-for-name in the same order. Endpoint-specific request/response wrappers live in the routers (backend) and `frontend/src/lib/api/botbeamApi.ts` (frontend).
 - `backend/services/auth_service.py` — JWT create/verify + `get_current_user` dependency.
 - `backend/services/user_service.py` — user/org CRUD (bcrypt via passlib).
-- `backend/services/device_service.py` — the three beams (`beam_default` / `beam_new` 409-on-dup / `beam_existing` 404-on-miss) + clear/rename/archive/unarchive/delete/reset + content validation (8 content types, 500 KB cap). Agents address the default display via the reserved `default` path segment; `list?view=summary` returns no bodies.
+- `backend/services/device_service.py` — the three beams (`beam_default` / `beam_new` 409-on-dup / `beam_existing` 404-on-miss) + clear/rename/archive/unarchive/delete/reset + content validation (9 content types, 500 KB cap — the canonical list is `ContentType` in `backend/schemas.py`). Agents address the default display via the reserved `default` path segment; `list?view=summary` returns no bodies.
 - `backend/routers/auth.py` → `/auth/*` · `backend/routers/devices.py` → `/api/devices`.
 - `backend/websocket.py` — per-user WS channels for live updates.
 

@@ -44,6 +44,7 @@ Names are unique per user — resolve a user-spoken name to an `id` with `list`.
 | `list` | JSON array of strings or `{text, checked?}` |
 | `dashboard` | JSON array of `{title, value, subtitle?}` — KPI cards |
 | `table` | JSON `{columns:[{id,label}], rows:[{colId:value,…}]}` |
+| `json` | raw JSON string — rendered pretty-printed |
 
 ## Rules / know-how
 

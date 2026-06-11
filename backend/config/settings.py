@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # Logging (mirrors the kh / table-that setup)
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "standard")  # "standard" | "json" (file handler)
     LOG_DIR: str = os.getenv("LOG_DIR", "logs")
     LOG_FILENAME_PREFIX: str = "botbeam"
     LOG_BACKUP_COUNT: int = 10
