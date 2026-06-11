@@ -4,7 +4,6 @@ import Home from './components/Home';
 import DeviceView from './components/DeviceView';
 import Auth from './components/Auth';
 import DebugPanel from './components/DebugPanel';
-import DropboxPanel from './components/DropboxPanel';
 
 function AppContent() {
   const { user, authChecked, activeTab } = useBotBeam();
@@ -17,7 +16,6 @@ function AppContent() {
       <TabBar />
       <div className="app-body">
         {activeTab === 'home' ? <Home /> : <DeviceView key={activeTab} deviceId={activeTab} />}
-        <DropboxPanel />
       </div>
       <DebugPanel />
     </div>

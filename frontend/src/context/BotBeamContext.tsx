@@ -19,7 +19,6 @@ interface BotBeamContextType {
   showDebug: boolean;
   connected: boolean;
   pulsingTab: string | null;
-  pulsingDropbox: string | null;
   version: string;
 
   login: (email: string, password: string) => Promise<void>;
@@ -28,6 +27,8 @@ interface BotBeamContextType {
   switchTab: (id: string) => void;
   addDevice: (name: string) => Promise<void>;
   removeDevice: (id: string) => Promise<void>;
+  archiveDevice: (id: string) => Promise<void>;
+  unarchiveDevice: (id: string) => Promise<void>;
   resetDevices: () => Promise<void>;
   toggleDebug: () => void;
   proxyUrl: (url: string) => string;
@@ -42,6 +43,15 @@ export function useBotBeam() {
   return context;
 }
 
+// Default display first, then by creation time — matches the server's ordering
+// so WS-driven inserts land in the same place a reload would put them.
+function sortDevices(list: Device[]): Device[] {
+  return [...list].sort((a, b) => {
+    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+    return a.createdAt < b.createdAt ? -1 : 1;
+  });
+}
+
 export function BotBeamProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -51,10 +61,8 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   const [showDebug, setShowDebug] = useState(false);
   const [connected, setConnected] = useState(false);
   const [pulsingTab, setPulsingTab] = useState<string | null>(null);
-  const [pulsingDropbox, setPulsingDropbox] = useState<string | null>(null);
   const [version, setVersion] = useState('');
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pulseDropboxTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
   const initialVersion = useRef('');
 
@@ -105,6 +113,16 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     await botbeamApi.deleteDevice(id);
   }, [user]);
 
+  const archiveDevice = useCallback(async (id: string) => {
+    if (!user) return;
+    await botbeamApi.archiveDevice(id);
+  }, [user]);
+
+  const unarchiveDevice = useCallback(async (id: string) => {
+    if (!user) return;
+    await botbeamApi.unarchiveDevice(id);
+  }, [user]);
+
   const resetDevices = useCallback(async () => {
     if (!user) return;
     await botbeamApi.resetDevices();
@@ -117,19 +135,19 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   // --- Load devices when logged in ---
 
   const refreshState = useCallback(async () => {
-    setDevices(await botbeamApi.getDevices());
+    setDevices(sortDevices(await botbeamApi.getDevices()));
   }, []);
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     botbeamApi.getDevices()
-      .then((d) => { if (!cancelled) setDevices(d); })
+      .then((d) => { if (!cancelled) setDevices(sortDevices(d)); })
       .catch(() => { if (!cancelled) console.error('Initial state load failed'); });
     return () => { cancelled = true; };
   }, [user]);
 
-  // --- Global WebSocket (authenticated via ?token=) ---
+  // --- WebSocket (authenticated via ?token=) ---
 
   useEffect(() => {
     if (!user) return;
@@ -139,11 +157,17 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     let ws: WebSocket;
     let isReconnect = false;
 
+    function pulse(id: string) {
+      clearTimeout(pulseTimer.current);
+      setPulsingTab(id);
+      pulseTimer.current = setTimeout(() => setPulsingTab(null), 800);
+    }
+
     function connect() {
       if (cancelled) return;
       const token = getToken();
       if (!token) return;
-      ws = new WebSocket(`${settings.wsUrl}/ws?token=${encodeURIComponent(token)}&device=_global`);
+      ws = new WebSocket(`${settings.wsUrl}/ws?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -157,48 +181,34 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
 
         switch (msg.event) {
           case 'device_created':
-            setDevices((prev) => prev.some((d) => d.id === msg.device.id) ? prev : [...prev, msg.device]);
-            if (msg.device.pickupMode) {
-              clearTimeout(pulseDropboxTimer.current);
-              setPulsingDropbox(msg.device.id);
-              pulseDropboxTimer.current = setTimeout(() => setPulsingDropbox(null), 800);
-            } else {
-              setActiveTab(msg.device.id);
-              clearTimeout(pulseTimer.current);
-              setPulsingTab(msg.device.id);
-              pulseTimer.current = setTimeout(() => setPulsingTab(null), 800);
-            }
+            setDevices((prev) => prev.some((d) => d.id === msg.device.id)
+              ? prev : sortDevices([...prev, msg.device]));
+            setActiveTab(msg.device.id);
+            pulse(msg.device.id);
             break;
           case 'device_updated':
             setDevices((prev) => prev.map((d) => d.id === msg.device.id ? msg.device : d));
-            if (msg.device.pickupMode) {
-              clearTimeout(pulseDropboxTimer.current);
-              setPulsingDropbox(msg.device.id);
-              pulseDropboxTimer.current = setTimeout(() => setPulsingDropbox(null), 800);
-            } else {
-              setActiveTab(msg.device.id);
-              clearTimeout(pulseTimer.current);
-              setPulsingTab(msg.device.id);
-              pulseTimer.current = setTimeout(() => setPulsingTab(null), 800);
-            }
+            setActiveTab(msg.device.id);
+            pulse(msg.device.id);
+            break;
+          case 'device_unarchived':
+            setDevices((prev) => prev.some((d) => d.id === msg.device.id)
+              ? prev.map((d) => d.id === msg.device.id ? msg.device : d)
+              : sortDevices([...prev, msg.device]));
+            pulse(msg.device.id);
+            break;
+          case 'device_archived':
+            setDevices((prev) => prev.filter((d) => d.id !== msg.deviceId));
+            setActiveTab((prev) => prev === msg.deviceId ? 'home' : prev);
             break;
           case 'device_deleted':
             setDevices((prev) => prev.filter((d) => d.id !== msg.deviceId));
             setActiveTab((prev) => prev === msg.deviceId ? 'home' : prev);
             break;
           case 'devices_reset':
-            setDevices([]);
+            // The default display survives a reset (cleared) — reload from the server.
+            refreshState().catch(() => setDevices([]));
             setActiveTab('home');
-            break;
-          case 'device_picked_up':
-            setDevices((prev) => prev.map((d) => {
-              if (d.id !== msg.deviceId) return d;
-              const pickup = { pickedUpBy: msg.pickedUpBy, pickedUpAt: new Date().toISOString() };
-              return { ...d, pickupCount: (d.pickupCount ?? 0) + 1, pickups: [pickup, ...(d.pickups ?? [])] };
-            }));
-            clearTimeout(pulseDropboxTimer.current);
-            setPulsingDropbox(msg.deviceId);
-            pulseDropboxTimer.current = setTimeout(() => setPulsingDropbox(null), 800);
             break;
         }
 
@@ -252,7 +262,6 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     showDebug,
     connected,
     pulsingTab,
-    pulsingDropbox,
     version,
     login,
     register,
@@ -260,6 +269,8 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     switchTab,
     addDevice,
     removeDevice,
+    archiveDevice,
+    unarchiveDevice,
     resetDevices,
     toggleDebug,
     proxyUrl,

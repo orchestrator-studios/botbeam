@@ -3,11 +3,17 @@ from enum import Enum as PyEnum
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Enum, ForeignKey, Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
+
+# Every table stores utf8mb4 so rich text (emoji, CJK, symbols, any language)
+# round-trips losslessly. Binary assets live in object storage (S3), referenced
+# here by URL — the DB stays text/metadata only.
+_UTF8MB4 = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
 
 class UserRole(str, PyEnum):
@@ -19,6 +25,7 @@ class UserRole(str, PyEnum):
 
 class Organization(Base):
     __tablename__ = "organizations"
+    __table_args__ = _UTF8MB4
 
     org_id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
@@ -28,6 +35,7 @@ class Organization(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = _UTF8MB4
 
     user_id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.org_id"), nullable=True, index=True)
@@ -43,12 +51,24 @@ class User(Base):
 
 
 class Device(Base):
-    """A display tab. Scoped directly to its owning user (no separate namespace)."""
+    """A display tab. Scoped directly to its owning user (no separate namespace).
+
+    Names are unique per user (case-insensitive via utf8mb4_unicode_ci) — the
+    agent resolves user-spoken names against them, so they must be unambiguous.
+    Each user has exactly one default display (is_default) that always exists
+    and can't be renamed, archived, or deleted.
+    """
     __tablename__ = "devices"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_device_user_name"),
+        _UTF8MB4,
+    )
 
     id = Column(String(16), primary_key=True)              # public handle (the API/skill uses this)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
     name = Column(String(255), nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime, nullable=True)          # non-null = off the display, restorable
     content_type = Column(String(20), nullable=True)
     content_body = Column(LONGTEXT, nullable=True)
     content_updated_at = Column(DateTime, nullable=True)

@@ -23,9 +23,11 @@ export const botbeamApi = {
 
   // ── Devices (namespace resolved server-side from the token) ──
   getDevices: () => get<Device[]>('/api/devices'),
+  getArchivedDevices: () => get<Device[]>('/api/devices?archived=true'),
   createDevice: (name: string) => post<Device>('/api/devices', { name }),
-  updateDevice: (id: string, updates: { name?: string; content?: { type: string; body: string } | null }) =>
-    patch<Device>(`/api/devices/${id}`, updates),
+  renameDevice: (id: string, name: string) => patch<Device>(`/api/devices/${id}`, { name }),
+  archiveDevice: (id: string) => post<Device>(`/api/devices/${id}/archive`),
+  unarchiveDevice: (id: string) => post<Device>(`/api/devices/${id}/unarchive`),
   deleteDevice: (id: string) => del(`/api/devices/${id}`),
   resetDevices: () => del('/api/devices'),
 

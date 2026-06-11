@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 
 export default function TabBar() {
-  const { devices, activeTab, switchTab, removeDevice, resetDevices, addDevice, connected, pulsingTab, version } = useBotBeam();
+  const { devices, activeTab, switchTab, removeDevice, archiveDevice, resetDevices, addDevice, connected, pulsingTab, version } = useBotBeam();
   const [showModal, setShowModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [closeTarget, setCloseTarget] = useState<{ id: string; name: string } | null>(null);
   const [showReset, setShowReset] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [newName, setNewName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
 
   function handleAbout() {
     setShowAbout(true);
@@ -16,13 +17,23 @@ export default function TabBar() {
   async function handleCreate() {
     const name = newName.trim();
     if (!name) return;
-    await addDevice(name);
-    setShowModal(false);
-    setNewName('');
+    try {
+      await addDevice(name);
+      setShowModal(false);
+      setNewName('');
+      setCreateError(null);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Could not create the tab');
+    }
+  }
+
+  function handleArchive(id: string) {
+    setCloseTarget(null);
+    archiveDevice(id);
   }
 
   function handleDelete(id: string) {
-    setDeleteTarget(null);
+    setCloseTarget(null);
     removeDevice(id);
   }
 
@@ -44,28 +55,30 @@ export default function TabBar() {
           Home
         </button>
 
-        {devices.filter(d => !d.pickupMode).map(d => (
+        {devices.map(d => (
           <button
             key={d.id}
             className={`tab ${activeTab === d.id ? 'active' : ''} ${pulsingTab === d.id ? 'tab-pulse' : ''}`}
             onClick={() => switchTab(d.id)}
           >
             <span>{d.name}</span>
-            <span
-              className="tab-close"
-              title="Delete tab"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeleteTarget({ id: d.id, name: d.name });
-              }}
-            >
-              &times;
-            </span>
+            {!d.isDefault && (
+              <span
+                className="tab-close"
+                title="Archive or delete tab"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCloseTarget({ id: d.id, name: d.name });
+                }}
+              >
+                &times;
+              </span>
+            )}
           </button>
         ))}
 
         <button className="tab tab-add" onClick={() => setShowModal(true)}>+</button>
-        {devices.filter(d => !d.pickupMode).length > 0 && (
+        {devices.some(d => !d.isDefault) && (
           <button className="tab tab-reset" title="Reset all tabs" onClick={() => setShowReset(true)}>
             Reset
           </button>
@@ -85,8 +98,9 @@ export default function TabBar() {
               onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
               autoFocus
             />
+            {createError && <p className="form-error">{createError}</p>}
             <div className="actions">
-              <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setShowModal(false); setCreateError(null); }}>Cancel</button>
               <button className="btn btn-primary" onClick={handleCreate}>Create</button>
             </div>
           </div>
@@ -99,7 +113,7 @@ export default function TabBar() {
           <div className="modal">
             <h2>Reset all tabs?</h2>
             <p style={{ color: 'var(--text-muted)', margin: '0 0 20px' }}>
-              This will delete all tabs and their content. This can't be undone.
+              This deletes every tab — including archived ones. Your main display is kept, cleared. This can't be undone.
             </p>
             <div className="actions">
               <button className="btn btn-ghost" onClick={() => setShowReset(false)}>Cancel</button>
@@ -127,17 +141,18 @@ export default function TabBar() {
         </div>
       )}
 
-      {/* Delete confirmation modal */}
-      {deleteTarget && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setDeleteTarget(null); }}>
+      {/* Archive / delete modal */}
+      {closeTarget && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setCloseTarget(null); }}>
           <div className="modal">
-            <h2>Delete "{deleteTarget.name}"?</h2>
+            <h2>Close "{closeTarget.name}"?</h2>
             <p style={{ color: 'var(--text-muted)', margin: '0 0 20px' }}>
-              This will remove the tab and its content. This can't be undone.
+              Archive keeps the tab and its content — browse and restore it from Home. Delete is permanent.
             </p>
             <div className="actions">
-              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
-              <button className="btn btn-danger" onClick={() => handleDelete(deleteTarget.id)}>Delete</button>
+              <button className="btn btn-ghost" onClick={() => setCloseTarget(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={() => handleDelete(closeTarget.id)}>Delete</button>
+              <button className="btn btn-primary" onClick={() => handleArchive(closeTarget.id)}>Archive</button>
             </div>
           </div>
         </div>

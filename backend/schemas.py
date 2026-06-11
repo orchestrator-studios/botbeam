@@ -49,5 +49,10 @@ class Content(BaseModel):
 
 
 class DeviceCreate(BaseModel):
-    name: str
+    """beam-new: name optional (server generates one), content optional (empty tab)."""
+    name: Optional[str] = None
     content: Optional[Content] = None
+
+
+class RenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)

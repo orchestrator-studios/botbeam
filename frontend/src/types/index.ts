@@ -1,16 +1,10 @@
-export interface Pickup {
-  pickedUpBy: string;
-  pickedUpAt: string;
-}
-
 export interface Device {
   id: string;
   name: string;
+  isDefault: boolean;
+  archivedAt: string | null;
   createdAt: string;
   content: Content | null;
-  pickupMode?: 'single' | 'multi';
-  pickupCount?: number;
-  pickups?: Pickup[];
 }
 
 export type ContentType = 'text' | 'markdown' | 'html' | 'url' | 'image' | 'list' | 'dashboard' | 'table' | 'json';
@@ -46,5 +40,6 @@ export type WSEvent =
   | { event: 'device_created'; device: Device }
   | { event: 'device_updated'; device: Device }
   | { event: 'device_deleted'; deviceId: string }
-  | { event: 'devices_reset' }
-  | { event: 'device_picked_up'; deviceId: string; pickedUpBy: string };
+  | { event: 'device_archived'; deviceId: string }
+  | { event: 'device_unarchived'; device: Device }
+  | { event: 'devices_reset' };

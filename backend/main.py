@@ -69,9 +69,15 @@ async def ws_endpoint(websocket: WebSocket):
         return
     await manager.connect(websocket, user_id)
     try:
+        # Server-push only: clients never send. Parking on receive() keeps the
+        # handler (and so the connection) alive until the client goes away.
         while True:
-            await websocket.receive_text()
+            msg = await websocket.receive()
+            if msg["type"] == "websocket.disconnect":
+                break
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket, user_id)
 
 
