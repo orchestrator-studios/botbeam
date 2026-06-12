@@ -29,6 +29,8 @@ export const botbeamApi = {
 
   // ── Devices (namespace resolved server-side from the token) ──
   getDevices: (): Promise<Device[]> => get<Device[]>('/api/devices'),
+  // Single device by id — returns archived devices too (used by the pinned view).
+  getDevice: (id: string): Promise<Device> => get<Device>(`/api/devices/${id}`),
   getArchivedDevices: (): Promise<Device[]> => get<Device[]>('/api/devices?archived=true'),
   createDevice: (name: string): Promise<Device> => post<Device>('/api/devices', { name }),
   renameDevice: (id: string, name: string): Promise<Device> =>

@@ -2,14 +2,18 @@ import { useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 import ContentRenderer from './ContentRenderer';
 import { TYPE_META, contentDetail, downloadMeta } from '../lib/contentMeta';
+import type { Device } from '../types';
 
 interface Props {
   deviceId: string;
+  // Render this device directly instead of looking it up in the active list —
+  // lets the pinned view show an archived device.
+  device?: Device;
 }
 
-export default function DeviceView({ deviceId }: Props) {
+export default function DeviceView({ deviceId, device: deviceProp }: Props) {
   const { devices } = useBotBeam();
-  const device = devices.find(d => d.id === deviceId);
+  const device = deviceProp ?? devices.find(d => d.id === deviceId);
   const content = device?.content ?? null;
   const [copied, setCopied] = useState(false);
 

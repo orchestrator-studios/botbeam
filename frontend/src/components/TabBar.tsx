@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 
 export default function TabBar() {
-  const { displays, activeTab, switchTab, removeDevice, archiveDevice, resetDevices, addDevice, connected, pulsingTab, version } = useBotBeam();
+  const { displays, activeTab, switchTab, removeDevice, archiveDevice, resetDevices, addDevice, pinDevice, connected, pulsingTab, version } = useBotBeam();
   const [showModal, setShowModal] = useState(false);
   const [closeTarget, setCloseTarget] = useState<{ id: string; name: string } | null>(null);
   const [showReset, setShowReset] = useState(false);
@@ -62,6 +62,16 @@ export default function TabBar() {
             onClick={() => switchTab(d.id)}
           >
             <span>{d.name}</span>
+            <span
+              className="tab-pin"
+              title={`Pin this browser to "${d.name}" (kiosk mode)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                pinDevice(d.id);
+              }}
+            >
+              {'\u{1F4CC}'}
+            </span>
             {!d.isDefault && (
               <span
                 className="tab-close"

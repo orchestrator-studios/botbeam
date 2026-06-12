@@ -17,6 +17,7 @@ interface BotBeamContextType {
   displays: Device[];
   lockboxes: Device[];
   activeTab: string;
+  pinnedId: string | null;
   wsLog: LogEntry[];
   showDebug: boolean;
   connected: boolean;
@@ -32,6 +33,8 @@ interface BotBeamContextType {
   archiveDevice: (id: string) => Promise<void>;
   unarchiveDevice: (id: string) => Promise<void>;
   resetDevices: () => Promise<void>;
+  pinDevice: (id: string) => void;
+  unpin: () => void;
   toggleDebug: () => void;
   proxyUrl: (url: string) => string;
 }
@@ -44,6 +47,10 @@ export function useBotBeam() {
   if (!context) throw new Error('useBotBeam must be used within a BotBeamProvider');
   return context;
 }
+
+// Pinning is a property of THIS browser instance (a kiosk screen like the
+// kitchen computer), not of the account — so it lives in localStorage.
+const PIN_KEY = 'botbeam_pin';
 
 // Default display first, then by creation time — matches the server's ordering
 // so WS-driven inserts land in the same place a reload would put them.
@@ -59,6 +66,7 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   const [authChecked, setAuthChecked] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [activeTab, setActiveTab] = useState('home');
+  const [pinnedId, setPinnedId] = useState<string | null>(() => localStorage.getItem(PIN_KEY));
   const [wsLog, setWsLog] = useState<LogEntry[]>([]);
   const [showDebug, setShowDebug] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -67,6 +75,10 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
   const initialVersion = useRef('');
+  // Mirror of pinnedId for the WS handler closure — changing the pin must not
+  // tear down and reconnect the socket.
+  const pinnedRef = useRef<string | null>(localStorage.getItem(PIN_KEY));
+  const pinParamApplied = useRef(false);
 
   // --- Auth ---
 
@@ -130,6 +142,43 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     await botbeamApi.resetDevices();
   }, [user]);
 
+  // --- Pinning (kiosk mode) ---
+
+  const pinDevice = useCallback((id: string) => {
+    localStorage.setItem(PIN_KEY, id);
+    pinnedRef.current = id;
+    setPinnedId(id);
+  }, []);
+
+  const unpin = useCallback(() => {
+    localStorage.removeItem(PIN_KEY);
+    pinnedRef.current = null;
+    setPinnedId(null);
+    // Strip a ?pin= kiosk bookmark so a reload doesn't immediately re-pin.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('pin')) {
+      url.searchParams.delete('pin');
+      window.history.replaceState({}, '', url);
+    }
+  }, []);
+
+  // Resolve a ?pin=<id-or-name> kiosk bookmark once devices are known. Keeps
+  // retrying on device updates until the named display exists, then applies once.
+  useEffect(() => {
+    if (pinParamApplied.current || devices.length === 0) return;
+    const param = new URLSearchParams(window.location.search).get('pin');
+    if (!param) {
+      pinParamApplied.current = true;
+      return;
+    }
+    const target = devices.find((d) => d.kind !== 'lockbox'
+      && (d.id === param || d.name.toLowerCase() === param.toLowerCase()));
+    if (target) {
+      pinParamApplied.current = true;
+      pinDevice(target.id);
+    }
+  }, [devices, pinDevice]);
+
   const toggleDebug = useCallback(() => setShowDebug((prev) => !prev), []);
 
   const proxyUrl = useCallback((url: string) => botbeamApi.proxyUrl(url), []);
@@ -186,14 +235,15 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
             setDevices((prev) => prev.some((d) => d.id === msg.device.id)
               ? prev : sortDevices([...prev, msg.device]));
             // Lockboxes are stashes — they land in the panel, not the screen.
-            if (msg.device.kind !== 'lockbox') {
+            // A pinned (kiosk) instance never follows beams to other devices.
+            if (msg.device.kind !== 'lockbox' && !pinnedRef.current) {
               setActiveTab(msg.device.id);
               pulse(msg.device.id);
             }
             break;
           case 'device_updated':
             setDevices((prev) => prev.map((d) => d.id === msg.device.id ? msg.device : d));
-            if (msg.device.kind !== 'lockbox') {
+            if (msg.device.kind !== 'lockbox' && !pinnedRef.current) {
               setActiveTab(msg.device.id);
               pulse(msg.device.id);
             }
@@ -270,6 +320,7 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     displays,
     lockboxes,
     activeTab,
+    pinnedId,
     wsLog,
     showDebug,
     connected,
@@ -284,6 +335,8 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     archiveDevice,
     unarchiveDevice,
     resetDevices,
+    pinDevice,
+    unpin,
     toggleDebug,
     proxyUrl,
   };

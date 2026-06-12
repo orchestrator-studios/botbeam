@@ -5,12 +5,14 @@ import DeviceView from './components/DeviceView';
 import Auth from './components/Auth';
 import DebugPanel from './components/DebugPanel';
 import LockboxPanel from './components/LockboxPanel';
+import PinnedView from './components/PinnedView';
 
 function AppContent() {
-  const { user, authChecked, activeTab } = useBotBeam();
+  const { user, authChecked, activeTab, pinnedId } = useBotBeam();
 
   if (!authChecked) return <div className="app-loading">Loading…</div>;
   if (!user) return <Auth />;
+  if (pinnedId) return <PinnedView />;
 
   return (
     <div className="app">
