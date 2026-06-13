@@ -1,4 +1,4 @@
-import { get, post, patch, del } from './index';
+import { get, post, patch, del, delJson } from './index';
 import { settings } from '../../config/settings';
 import type { Device, User } from '../../types';
 
@@ -39,6 +39,13 @@ export const botbeamApi = {
   unarchiveDevice: (id: string): Promise<Device> => post<Device>(`/api/devices/${id}/unarchive`),
   deleteDevice: (id: string): Promise<void> => del(`/api/devices/${id}`),
   resetDevices: (): Promise<void> => del('/api/devices'),
+
+  // ── Sharing (view-only grants to other accounts) ──
+  getSharedDevices: (): Promise<Device[]> => get<Device[]>('/api/devices/shared'),
+  shareDevice: (id: string, email: string): Promise<Device> =>
+    post<Device>(`/api/devices/${id}/shares`, { email }),
+  unshareDevice: (id: string, email: string): Promise<Device> =>
+    delJson<Device>(`/api/devices/${id}/shares?email=${encodeURIComponent(email)}`),
 
   proxyUrl: (url: string): string => `${settings.apiUrl}/api/proxy?url=${encodeURIComponent(url)}`,
 };

@@ -83,3 +83,24 @@ class Device(Base):
     content_body = Column(LONGTEXT, nullable=True)
     content_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DeviceShare(Base):
+    """A view-only grant of a device to another user.
+
+    The device's owner creates these (by the grantee's email); the grantee then
+    sees the device under "Shared with me" and watches its live content, but
+    can't modify it — only the owner can beam/rename/archive/delete. Deleting the
+    row revokes access. Rows cascade away when either the device or the grantee
+    is removed. One row per (device, grantee); re-sharing is idempotent.
+    """
+    __tablename__ = "device_shares"
+    __table_args__ = (
+        UniqueConstraint("device_id", "grantee_user_id", name="uq_share_device_grantee"),
+        _UTF8MB4,
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String(16), ForeignKey("devices.id", ondelete="CASCADE"), index=True, nullable=False)
+    grantee_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -43,6 +43,14 @@ class Device(BaseModel):
     archivedAt: Optional[str] = None
     createdAt: Optional[str] = None
     content: Optional[DeviceContent] = None
+    # ── sharing ──
+    # ownerId is always set: a viewer compares it to their own id to tell an
+    # owned device from one shared with them. ownerEmail is populated only when
+    # the device is shown to a grantee (who shared it). sharedWith is the owner's
+    # grantee list — populated only in the owner's own views, never to grantees.
+    ownerId: Optional[int] = None
+    ownerEmail: Optional[str] = None
+    sharedWith: Optional[list[str]] = None
 
 
 class DeviceSummary(BaseModel):

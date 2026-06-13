@@ -17,7 +17,7 @@ from database import get_async_db
 from schemas import Device, DeviceKind, DeviceSummary
 from services.auth_service import get_current_user
 from services.device_service import (
-    DeviceService, ContentError, NameConflict, DefaultDeviceError,
+    DeviceService, ContentError, NameConflict, DefaultDeviceError, ShareError,
 )
 from websocket import manager
 
@@ -26,6 +26,10 @@ from websocket import manager
 class Content(BaseModel):
     type: str
     body: str
+
+
+class ShareRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=255)
 
 
 class DeviceCreate(BaseModel):
@@ -48,6 +52,14 @@ def _svc(db: AsyncSession) -> DeviceService:
     return DeviceService(db)
 
 
+async def _emit(db: AsyncSession, owner_id: int, device_id: str, message: dict) -> None:
+    """Broadcast a device event to the owner and everyone it's shared with, so a
+    grantee's screen (or pinned kiosk) tracks the owner's beams live."""
+    await manager.broadcast(owner_id, message)
+    for gid in await _svc(db).grantee_ids(device_id):
+        await manager.broadcast(gid, message)
+
+
 @router.get("/devices", response_model=list[Device] | list[DeviceSummary])
 async def list_devices(
     archived: bool = False, view: str = "full", kind: str | None = None,
@@ -62,8 +74,15 @@ async def list_devices(
     )
 
 
+# Registered before /devices/{device_id} so "shared" isn't taken for an id.
+@router.get("/devices/shared", response_model=list[Device])
+async def list_shared_with_me(user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
+    return await _svc(db).shared_with_me(user.user_id)
+
+
 @router.get("/devices/{device_id}", response_model=Device)
 async def get_device(device_id: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
+    # Owner-or-grantee read (a shared device is visible to its grantees).
     dev = await _svc(db).get(user.user_id, device_id)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -79,7 +98,7 @@ async def beam_default(body: Content, user=Depends(get_current_user), db: AsyncS
     except ContentError as e:
         raise HTTPException(status_code=400, detail=str(e))
     event = "device_created" if created else "device_updated"
-    await manager.broadcast(user.user_id, {"event": event, "device": dev})
+    await _emit(db, user.user_id, dev["id"], {"event": event, "device": dev})
     return dev
 
 
@@ -111,8 +130,8 @@ async def beam_existing(
         raise HTTPException(status_code=404, detail="Device not found")
     dev, was_archived = result
     if was_archived:
-        await manager.broadcast(user.user_id, {"event": "device_unarchived", "device": dev})
-    await manager.broadcast(user.user_id, {"event": "device_updated", "device": dev})
+        await _emit(db, user.user_id, dev["id"], {"event": "device_unarchived", "device": dev})
+    await _emit(db, user.user_id, dev["id"], {"event": "device_updated", "device": dev})
     return dev
 
 
@@ -121,7 +140,7 @@ async def beam_existing(
 @router.delete("/devices/default/content", response_model=Device)
 async def clear_default(user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
     dev = await _svc(db).clear(user.user_id, None)
-    await manager.broadcast(user.user_id, {"event": "device_updated", "device": dev})
+    await _emit(db, user.user_id, dev["id"], {"event": "device_updated", "device": dev})
     return dev
 
 
@@ -130,7 +149,7 @@ async def clear_device(device_id: str, user=Depends(get_current_user), db: Async
     dev = await _svc(db).clear(user.user_id, device_id)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
-    await manager.broadcast(user.user_id, {"event": "device_updated", "device": dev})
+    await _emit(db, user.user_id, device_id, {"event": "device_updated", "device": dev})
     return dev
 
 
@@ -149,7 +168,7 @@ async def rename_device(
         raise HTTPException(status_code=400, detail=str(e))
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
-    await manager.broadcast(user.user_id, {"event": "device_updated", "device": dev})
+    await _emit(db, user.user_id, device_id, {"event": "device_updated", "device": dev})
     return dev
 
 
@@ -161,7 +180,8 @@ async def archive_device(device_id: str, user=Depends(get_current_user), db: Asy
         raise HTTPException(status_code=403, detail=str(e))
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
-    await manager.broadcast(user.user_id, {"event": "device_archived", "deviceId": device_id})
+    # Grantees drop an archived device from their "Shared with me" list.
+    await _emit(db, user.user_id, device_id, {"event": "device_archived", "deviceId": device_id})
     return dev
 
 
@@ -170,24 +190,74 @@ async def unarchive_device(device_id: str, user=Depends(get_current_user), db: A
     dev = await _svc(db).unarchive(user.user_id, device_id)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
-    await manager.broadcast(user.user_id, {"event": "device_unarchived", "device": dev})
+    await _emit(db, user.user_id, device_id, {"event": "device_unarchived", "device": dev})
     return dev
 
 
 @router.delete("/devices/{device_id}", status_code=204)
 async def delete_device(device_id: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
+    # Capture grantees before the row (and its share rows) cascade away.
+    grantees = await _svc(db).grantee_ids(device_id)
     try:
         ok = await _svc(db).delete(user.user_id, device_id)
     except DefaultDeviceError as e:
         raise HTTPException(status_code=403, detail=str(e))
     if ok is None:
         raise HTTPException(status_code=404, detail="Device not found")
-    await manager.broadcast(user.user_id, {"event": "device_deleted", "deviceId": device_id})
+    msg = {"event": "device_deleted", "deviceId": device_id}
+    await manager.broadcast(user.user_id, msg)
+    for gid in grantees:
+        await manager.broadcast(gid, msg)
     return Response(status_code=204)
 
 
 @router.delete("/devices", status_code=204)
 async def reset_devices(user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
+    # Capture who was viewing each shared device before they're deleted, so each
+    # grantee can be told their share vanished (a blanket reset isn't theirs).
+    grantee_map = await _svc(db).grantee_map(user.user_id)
     await _svc(db).reset(user.user_id)
     await manager.broadcast(user.user_id, {"event": "devices_reset"})
+    for did, gids in grantee_map.items():
+        for gid in gids:
+            await manager.broadcast(gid, {"event": "device_deleted", "deviceId": did})
     return Response(status_code=204)
+
+
+# ── sharing (view-only grants to other accounts) ──
+
+@router.get("/devices/{device_id}/shares", response_model=list[str])
+async def list_device_shares(device_id: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db)):
+    emails = await _svc(db).list_shares(user.user_id, device_id)
+    if emails is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    return emails
+
+
+@router.post("/devices/{device_id}/shares", response_model=Device)
+async def share_device(
+    device_id: str, body: ShareRequest,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        result = await _svc(db).share(user.user_id, device_id, body.email)
+    except ShareError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    # Tell the grantee's open sessions a new shared device is available.
+    await manager.broadcast(result["grantee_id"], {"event": "device_shared", "device": result["grantee_device"]})
+    return result["device"]
+
+
+@router.delete("/devices/{device_id}/shares", response_model=Device)
+async def unshare_device(
+    device_id: str, email: str,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    result = await _svc(db).unshare(user.user_id, device_id, email)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if result["grantee_id"] is not None:
+        await manager.broadcast(result["grantee_id"], {"event": "device_unshared", "deviceId": device_id})
+    return result["device"]

@@ -30,6 +30,14 @@ export interface Device {
   archivedAt: string | null;
   createdAt: string;
   content: DeviceContent | null;
+  // ── sharing ──
+  // ownerId always travels: compare it to your own user_id to tell an owned
+  // device from one shared with you. ownerEmail is set only on devices shared
+  // *to* you (who shared it). sharedWith is your grantee list — set only on
+  // your own devices, never exposed to grantees.
+  ownerId?: number;
+  ownerEmail?: string | null;
+  sharedWith?: string[] | null;
 }
 
 // Lightweight listing — no content bodies (the agent's list?view=summary shape).
@@ -74,4 +82,6 @@ export type WSEvent =
   | { event: 'device_deleted'; deviceId: string }
   | { event: 'device_archived'; deviceId: string }
   | { event: 'device_unarchived'; device: Device }
+  | { event: 'device_shared'; device: Device }      // a device was shared with me
+  | { event: 'device_unshared'; deviceId: string }  // my access to a shared device was revoked
   | { event: 'devices_reset' };

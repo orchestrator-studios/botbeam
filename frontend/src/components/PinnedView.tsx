@@ -12,8 +12,10 @@ import DeviceView from './DeviceView';
 // Archived devices aren't in the active list, so when the device drops out we
 // fetch its snapshot by id — only a 404 (deleted) gives up.
 export default function PinnedView() {
-  const { pinnedId, devices, unpin, connected } = useBotBeam();
-  const live = devices.find((d) => d.id === pinnedId);
+  const { pinnedId, devices, sharedDevices, unpin, connected } = useBotBeam();
+  // A kiosk can be pinned to an owned display or one shared with it — watch both
+  // lists so live beams refresh the screen either way.
+  const live = devices.find((d) => d.id === pinnedId) ?? sharedDevices.find((d) => d.id === pinnedId);
   const [snapshot, setSnapshot] = useState<Device | null>(null);
   const [deleted, setDeleted] = useState(false);
 
@@ -28,8 +30,8 @@ export default function PinnedView() {
       .then((d) => { if (!cancelled) { setSnapshot(d); setDeleted(false); } })
       .catch(() => { if (!cancelled) { setSnapshot(null); setDeleted(true); } });
     return () => { cancelled = true; };
-    // `devices` is a dep so a delete-while-archived (no `live` transition) still re-checks.
-  }, [live, pinnedId, devices]);
+    // device lists are deps so a delete/unshare (no `live` transition) still re-checks.
+  }, [live, pinnedId, devices, sharedDevices]);
 
   const device = live ?? snapshot;
 

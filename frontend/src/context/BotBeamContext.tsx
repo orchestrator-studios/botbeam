@@ -12,10 +12,12 @@ interface LogEntry {
 
 interface BotBeamContextType {
   user: string | null;
+  userId: number | null;
   authChecked: boolean;
   devices: Device[];
   displays: Device[];
   lockboxes: Device[];
+  sharedDevices: Device[];
   activeTab: string;
   pinnedId: string | null;
   wsLog: LogEntry[];
@@ -33,6 +35,8 @@ interface BotBeamContextType {
   archiveDevice: (id: string) => Promise<void>;
   unarchiveDevice: (id: string) => Promise<void>;
   resetDevices: () => Promise<void>;
+  shareDevice: (id: string, email: string) => Promise<Device>;
+  unshareDevice: (id: string, email: string) => Promise<Device>;
   pinDevice: (id: string) => void;
   unpin: () => void;
   toggleDebug: () => void;
@@ -61,10 +65,28 @@ function sortDevices(list: Device[]): Device[] {
   });
 }
 
+// Shared-with-me devices: just by creation time (no default among them).
+function sortShared(list: Device[]): Device[] {
+  return [...list].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+}
+
+// Upsert a shared device from a WS payload. Owner-driven content updates carry
+// no ownerEmail (it's not theirs to send), so keep the email we already have.
+function upsertShared(prev: Device[], dev: Device): Device[] {
+  const existing = prev.find((d) => d.id === dev.id);
+  if (existing) {
+    const merged = { ...dev, ownerEmail: dev.ownerEmail ?? existing.ownerEmail };
+    return prev.map((d) => (d.id === dev.id ? merged : d));
+  }
+  return sortShared([...prev, dev]);
+}
+
 export function BotBeamProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<string | null>(null);
+  const [userId, setUserId] = useState<number | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [sharedDevices, setSharedDevices] = useState<Device[]>([]);
   const [activeTab, setActiveTab] = useState('home');
   const [pinnedId, setPinnedId] = useState<string | null>(() => localStorage.getItem(PIN_KEY));
   const [wsLog, setWsLog] = useState<LogEntry[]>([]);
@@ -79,25 +101,37 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   // tear down and reconnect the socket.
   const pinnedRef = useRef<string | null>(localStorage.getItem(PIN_KEY));
   const pinParamApplied = useRef(false);
+  // Mirror of userId for the WS closure — the handler routes each device event
+  // to the owned list or the shared list by comparing ownerId to my id.
+  const userIdRef = useRef<number | null>(null);
 
   // --- Auth ---
+
+  const identify = useCallback((email: string, id: number) => {
+    userIdRef.current = id;
+    setUserId(id);
+    setUser(email);
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const r = await botbeamApi.login(email, password);
     setToken(r.access_token);
-    setUser(r.email);
-  }, []);
+    identify(r.email, r.user_id);
+  }, [identify]);
 
   const register = useCallback(async (email: string, password: string) => {
     const r = await botbeamApi.register(email, password);
     setToken(r.access_token);
-    setUser(r.email);
-  }, []);
+    identify(r.email, r.user_id);
+  }, [identify]);
 
   const logout = useCallback(() => {
     clearToken();
+    userIdRef.current = null;
     setUser(null);
+    setUserId(null);
     setDevices([]);
+    setSharedDevices([]);
     setActiveTab('home');
   }, []);
 
@@ -108,10 +142,10 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
       return;
     }
     botbeamApi.me()
-      .then((u) => setUser(u.email))
+      .then((u) => identify(u.email, u.user_id))
       .catch(() => { clearToken(); setUser(null); })
       .finally(() => setAuthChecked(true));
-  }, []);
+  }, [identify]);
 
   // --- Device actions ---
 
@@ -142,6 +176,20 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     await botbeamApi.resetDevices();
   }, [user]);
 
+  // Share/unshare return the owner-facing device (with its updated grantee list);
+  // patch it into the local list so the share dialog reflects the change at once.
+  const shareDevice = useCallback(async (id: string, email: string) => {
+    const dev = await botbeamApi.shareDevice(id, email);
+    setDevices((prev) => prev.map((d) => (d.id === id ? dev : d)));
+    return dev;
+  }, []);
+
+  const unshareDevice = useCallback(async (id: string, email: string) => {
+    const dev = await botbeamApi.unshareDevice(id, email);
+    setDevices((prev) => prev.map((d) => (d.id === id ? dev : d)));
+    return dev;
+  }, []);
+
   // --- Pinning (kiosk mode) ---
 
   const pinDevice = useCallback((id: string) => {
@@ -165,19 +213,22 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   // Resolve a ?pin=<id-or-name> kiosk bookmark once devices are known. Keeps
   // retrying on device updates until the named display exists, then applies once.
   useEffect(() => {
-    if (pinParamApplied.current || devices.length === 0) return;
+    if (pinParamApplied.current) return;
+    if (devices.length === 0 && sharedDevices.length === 0) return;
     const param = new URLSearchParams(window.location.search).get('pin');
     if (!param) {
       pinParamApplied.current = true;
       return;
     }
-    const target = devices.find((d) => d.kind !== 'lockbox'
-      && (d.id === param || d.name.toLowerCase() === param.toLowerCase()));
+    // A kiosk can pin its own display or one shared with it.
+    const match = (d: Device) => d.kind !== 'lockbox'
+      && (d.id === param || d.name.toLowerCase() === param.toLowerCase());
+    const target = devices.find(match) ?? sharedDevices.find(match);
     if (target) {
       pinParamApplied.current = true;
       pinDevice(target.id);
     }
-  }, [devices, pinDevice]);
+  }, [devices, sharedDevices, pinDevice]);
 
   const toggleDebug = useCallback(() => setShowDebug((prev) => !prev), []);
 
@@ -186,14 +237,23 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   // --- Load devices when logged in ---
 
   const refreshState = useCallback(async () => {
-    setDevices(sortDevices(await botbeamApi.getDevices()));
+    const [own, shared] = await Promise.all([
+      botbeamApi.getDevices(),
+      botbeamApi.getSharedDevices(),
+    ]);
+    setDevices(sortDevices(own));
+    setSharedDevices(sortShared(shared));
   }, []);
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    botbeamApi.getDevices()
-      .then((d) => { if (!cancelled) setDevices(sortDevices(d)); })
+    Promise.all([botbeamApi.getDevices(), botbeamApi.getSharedDevices()])
+      .then(([own, shared]) => {
+        if (cancelled) return;
+        setDevices(sortDevices(own));
+        setSharedDevices(sortShared(shared));
+      })
       .catch(() => { if (!cancelled) console.error('Initial state load failed'); });
     return () => { cancelled = true; };
   }, [user]);
@@ -230,8 +290,13 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
       ws.onmessage = (e) => {
         const msg: WSEvent = JSON.parse(e.data);
 
+        // A device event is about an owned device or one shared with me; route
+        // by ownerId (absent on legacy payloads → treat as mine).
+        const isMine = (d: Device) => d.ownerId === undefined || d.ownerId === userIdRef.current;
+
         switch (msg.event) {
           case 'device_created':
+            // Only ever fired for the owner (a fresh device has no grantees yet).
             setDevices((prev) => prev.some((d) => d.id === msg.device.id)
               ? prev : sortDevices([...prev, msg.device]));
             // Lockboxes are stashes — they land in the panel, not the screen.
@@ -242,24 +307,49 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
             }
             break;
           case 'device_updated':
-            setDevices((prev) => prev.map((d) => d.id === msg.device.id ? msg.device : d));
-            if (msg.device.kind !== 'lockbox' && !pinnedRef.current) {
-              setActiveTab(msg.device.id);
+            if (isMine(msg.device)) {
+              setDevices((prev) => prev.map((d) => d.id === msg.device.id ? msg.device : d));
+              if (msg.device.kind !== 'lockbox' && !pinnedRef.current) {
+                setActiveTab(msg.device.id);
+                pulse(msg.device.id);
+              }
+            } else {
+              // Owner beamed to a device shared with me — refresh it in place,
+              // but don't yank my view to it.
+              setSharedDevices((prev) => upsertShared(prev, msg.device));
               pulse(msg.device.id);
             }
             break;
           case 'device_unarchived':
-            setDevices((prev) => prev.some((d) => d.id === msg.device.id)
-              ? prev.map((d) => d.id === msg.device.id ? msg.device : d)
-              : sortDevices([...prev, msg.device]));
+            if (isMine(msg.device)) {
+              setDevices((prev) => prev.some((d) => d.id === msg.device.id)
+                ? prev.map((d) => d.id === msg.device.id ? msg.device : d)
+                : sortDevices([...prev, msg.device]));
+            } else {
+              setSharedDevices((prev) => upsertShared(prev, msg.device));
+            }
             pulse(msg.device.id);
             break;
           case 'device_archived':
+            // Removed from whichever list holds it (owner's tabs or my shared list).
             setDevices((prev) => prev.filter((d) => d.id !== msg.deviceId));
+            setSharedDevices((prev) => prev.filter((d) => d.id !== msg.deviceId));
             setActiveTab((prev) => prev === msg.deviceId ? 'home' : prev);
             break;
           case 'device_deleted':
             setDevices((prev) => prev.filter((d) => d.id !== msg.deviceId));
+            setSharedDevices((prev) => prev.filter((d) => d.id !== msg.deviceId));
+            setActiveTab((prev) => prev === msg.deviceId ? 'home' : prev);
+            break;
+          case 'device_shared':
+            // A device was just shared with me — add it to my shared list.
+            setSharedDevices((prev) => upsertShared(prev, msg.device));
+            pulse(msg.device.id);
+            break;
+          case 'device_unshared':
+            // My access was revoked — drop it (a pin to it will now 404, showing
+            // the kiosk's "not available" state).
+            setSharedDevices((prev) => prev.filter((d) => d.id !== msg.deviceId));
             setActiveTab((prev) => prev === msg.deviceId ? 'home' : prev);
             break;
           case 'devices_reset':
@@ -315,10 +405,12 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
 
   const value: BotBeamContextType = {
     user,
+    userId,
     authChecked,
     devices,
     displays,
     lockboxes,
+    sharedDevices,
     activeTab,
     pinnedId,
     wsLog,
@@ -335,6 +427,8 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     archiveDevice,
     unarchiveDevice,
     resetDevices,
+    shareDevice,
+    unshareDevice,
     pinDevice,
     unpin,
     toggleDebug,

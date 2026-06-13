@@ -62,3 +62,7 @@ export const del = async (url: string): Promise<void> => {
     throw err;
   }
 };
+
+// DELETE that returns a body and surfaces the server's error message (via req) —
+// used where the endpoint responds with content, e.g. unshare returns the device.
+export const delJson = <T>(url: string) => req<T>(url, { method: 'DELETE' });

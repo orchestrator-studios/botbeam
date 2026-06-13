@@ -17,7 +17,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Device
+from models import Device, DeviceShare, User
 from schemas import ContentType, DeviceKind
 
 logger = logging.getLogger("botbeam.devices")
@@ -39,6 +39,10 @@ class NameConflict(ValueError):
 
 class DefaultDeviceError(ValueError):
     """Operation not allowed on the default display — surfaced as a 403."""
+
+
+class ShareError(ValueError):
+    """Invalid share request (bad email, unknown account, …) — surfaced as a 400."""
 
 
 def _gen_id() -> str:
@@ -77,7 +81,9 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
     return (dt.isoformat() + "Z") if dt else None
 
 
-def serialize(d: Device) -> dict:
+def serialize(
+    d: Device, *, owner_email: Optional[str] = None, shared_with: Optional[list[str]] = None,
+) -> dict:
     content = None
     if d.content_type:
         content = {
@@ -94,6 +100,12 @@ def serialize(d: Device) -> dict:
         "archivedAt": _iso(d.archived_at),
         "createdAt": _iso(d.created_at),
         "content": content,
+        # ownerId always travels so any recipient (owner or grantee) can tell
+        # whose device this is. owner_email/shared_with are set by the caller
+        # only where they're meant to be seen (see schemas.Device).
+        "ownerId": d.user_id,
+        "ownerEmail": owner_email,
+        "sharedWith": shared_with,
     }
 
 
@@ -135,16 +147,36 @@ class DeviceService:
         res = await self.db.execute(
             select(Device).where(*conds).order_by(Device.is_default.desc(), Device.created_at)
         )
-        shape = summarize if summary else serialize
-        return [shape(d) for d in res.scalars().all()]
+        rows = res.scalars().all()
+        if summary:
+            return [summarize(d) for d in rows]
+        shares = await self._shares_map(user_id)
+        return [serialize(d, shared_with=shares.get(d.id)) for d in rows]
 
     async def get(self, user_id: int, device_id: str) -> Optional[dict]:
+        """Owner-or-grantee read. Own devices carry their grantee list; a device
+        shared with you carries the owner's email (and never the grantee list)."""
         d = await self._get(user_id, device_id)
-        return serialize(d) if d else None
+        if d:
+            return serialize(d, shared_with=await self._shared_with_emails(d.id))
+        d = await self._get_shared_to(user_id, device_id)
+        if d:
+            return serialize(d, owner_email=await self._owner_email(d.user_id))
+        return None
 
     async def _get(self, user_id: int, device_id: str) -> Optional[Device]:
+        """Owner-scoped fetch — the gate for every mutation (only the owner acts)."""
         res = await self.db.execute(
             select(Device).where(Device.user_id == user_id, Device.id == device_id)
+        )
+        return res.scalars().first()
+
+    async def _get_shared_to(self, user_id: int, device_id: str) -> Optional[Device]:
+        """A device shared *to* this user (any archived state — pins outlive archiving)."""
+        res = await self.db.execute(
+            select(Device)
+            .join(DeviceShare, DeviceShare.device_id == Device.id)
+            .where(DeviceShare.grantee_user_id == user_id, Device.id == device_id)
         )
         return res.scalars().first()
 
@@ -325,3 +357,133 @@ class DeviceService:
         d, _ = await self.get_or_create_default(user_id)
         await self._set_content(d, None)
         return serialize(d)
+
+    # ── sharing (view-only grants to other accounts) ──
+
+    async def shared_with_me(self, user_id: int) -> list[dict]:
+        """Active (non-archived) devices other users have shared with this user,
+        each tagged with the owner's email so the UI can show who shared it."""
+        res = await self.db.execute(
+            select(Device, User.email)
+            .join(DeviceShare, DeviceShare.device_id == Device.id)
+            .join(User, User.user_id == Device.user_id)
+            .where(DeviceShare.grantee_user_id == user_id, Device.archived_at.is_(None))
+            .order_by(Device.created_at)
+        )
+        return [serialize(d, owner_email=email) for d, email in res.all()]
+
+    async def share(self, owner_id: int, device_id: str, grantee_email: str) -> Optional[dict]:
+        """Grant a grantee (by email) view-only access to an owned display.
+        Idempotent. Returns None if the device isn't the caller's; raises
+        ShareError for a bad/unknown/self email. The returned dict carries the
+        owner-facing device (with updated sharedWith), the grantee's user id, and
+        the grantee-facing device payload (for the live 'device_shared' push)."""
+        d = await self._get(owner_id, device_id)
+        if not d:
+            return None
+        if d.kind != "display":
+            raise ShareError("Only displays can be shared, not lockboxes")
+        email = (grantee_email or "").strip()
+        if not email:
+            raise ShareError("An email is required")
+        grantee = (await self.db.execute(
+            select(User).where(User.email == email)  # utf8mb4_unicode_ci → case-insensitive
+        )).scalars().first()
+        if not grantee:
+            raise ShareError(f"No BotBeam account for {email}")
+        if grantee.user_id == owner_id:
+            raise ShareError("You already own this display")
+        exists = (await self.db.execute(select(DeviceShare).where(
+            DeviceShare.device_id == device_id,
+            DeviceShare.grantee_user_id == grantee.user_id,
+        ))).scalars().first()
+        if not exists:
+            self.db.add(DeviceShare(device_id=device_id, grantee_user_id=grantee.user_id))
+            try:
+                await self.db.commit()
+            except IntegrityError:
+                await self.db.rollback()  # lost a race; the grant already exists
+            logger.info("Device shared (owner=%s, device=%s, grantee=%s)", owner_id, device_id, grantee.user_id)
+        owner_email = await self._owner_email(owner_id)
+        return {
+            "device": serialize(d, shared_with=await self._shared_with_emails(device_id)),
+            "grantee_id": grantee.user_id,
+            "grantee_device": serialize(d, owner_email=owner_email),
+        }
+
+    async def unshare(self, owner_id: int, device_id: str, grantee_email: str) -> Optional[dict]:
+        """Revoke a grantee's access. Returns the owner-facing device (updated
+        sharedWith) and the revoked grantee's id (None if no such account), or
+        None if the device isn't the caller's."""
+        d = await self._get(owner_id, device_id)
+        if not d:
+            return None
+        grantee = (await self.db.execute(
+            select(User).where(User.email == (grantee_email or "").strip())
+        )).scalars().first()
+        grantee_id = grantee.user_id if grantee else None
+        if grantee_id is not None:
+            await self.db.execute(delete(DeviceShare).where(
+                DeviceShare.device_id == device_id,
+                DeviceShare.grantee_user_id == grantee_id,
+            ))
+            await self.db.commit()
+            logger.info("Device unshared (owner=%s, device=%s, grantee=%s)", owner_id, device_id, grantee_id)
+        return {
+            "device": serialize(d, shared_with=await self._shared_with_emails(device_id)),
+            "grantee_id": grantee_id,
+        }
+
+    async def list_shares(self, owner_id: int, device_id: str) -> Optional[list[str]]:
+        """Emails an owned device is shared with (None if not the caller's)."""
+        d = await self._get(owner_id, device_id)
+        if not d:
+            return None
+        return await self._shared_with_emails(device_id)
+
+    async def grantee_ids(self, device_id: str) -> list[int]:
+        """User ids a device is shared with — used to fan WS events out to viewers."""
+        res = await self.db.execute(
+            select(DeviceShare.grantee_user_id).where(DeviceShare.device_id == device_id)
+        )
+        return [g for (g,) in res.all()]
+
+    async def grantee_map(self, owner_id: int) -> dict[str, list[int]]:
+        """{device_id: [grantee_user_id, …]} across all of the owner's devices —
+        captured before a reset so each viewer can be told their share vanished."""
+        res = await self.db.execute(
+            select(DeviceShare.device_id, DeviceShare.grantee_user_id)
+            .join(Device, Device.id == DeviceShare.device_id)
+            .where(Device.user_id == owner_id)
+        )
+        out: dict[str, list[int]] = {}
+        for did, gid in res.all():
+            out.setdefault(did, []).append(gid)
+        return out
+
+    async def _shared_with_emails(self, device_id: str) -> list[str]:
+        res = await self.db.execute(
+            select(User.email)
+            .join(DeviceShare, DeviceShare.grantee_user_id == User.user_id)
+            .where(DeviceShare.device_id == device_id)
+            .order_by(User.email)
+        )
+        return [e for (e,) in res.all()]
+
+    async def _shares_map(self, owner_id: int) -> dict[str, list[str]]:
+        """{device_id: [grantee_email, …]} for one owner's devices in a single query."""
+        res = await self.db.execute(
+            select(DeviceShare.device_id, User.email)
+            .join(Device, Device.id == DeviceShare.device_id)
+            .join(User, User.user_id == DeviceShare.grantee_user_id)
+            .where(Device.user_id == owner_id)
+            .order_by(User.email)
+        )
+        out: dict[str, list[str]] = {}
+        for did, email in res.all():
+            out.setdefault(did, []).append(email)
+        return out
+
+    async def _owner_email(self, user_id: int) -> Optional[str]:
+        res = await self.db.execute(select(User.email).where(User.user_id == user_id))
+        return res.scalar_one_or_none()

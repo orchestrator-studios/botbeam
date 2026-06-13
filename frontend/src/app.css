@@ -122,6 +122,70 @@ body:has(.app) {
   opacity: 1;
 }
 
+/* Shared-with-me tabs (read-only views of someone else's display) */
+.tab-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
+.tab-shared-icon {
+  font-size: 0.75rem;
+  margin-right: 5px;
+  opacity: 0.8;
+}
+
+.tab-shared {
+  font-style: italic;
+}
+
+/* "Shared by …" tag in the device info bar */
+.shared-by {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── Share dialog ── */
+.share-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.share-add input {
+  flex: 1;
+}
+
+.share-list {
+  margin-top: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.share-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 4px 0;
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.share-row:last-child {
+  border-bottom: none;
+}
+
+.share-email {
+  font-size: 0.85rem;
+}
+
 /* ── Pinned (kiosk) mode ── */
 .pinned-bar {
   display: flex;

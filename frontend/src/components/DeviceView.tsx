@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 import ContentRenderer from './ContentRenderer';
+import ShareModal from './ShareModal';
 import { TYPE_META, contentDetail, downloadMeta } from '../lib/contentMeta';
 import type { Device } from '../types';
 
@@ -12,10 +13,17 @@ interface Props {
 }
 
 export default function DeviceView({ deviceId, device: deviceProp }: Props) {
-  const { devices } = useBotBeam();
-  const device = deviceProp ?? devices.find(d => d.id === deviceId);
+  const { devices, sharedDevices, userId } = useBotBeam();
+  const device = deviceProp
+    ?? devices.find(d => d.id === deviceId)
+    ?? sharedDevices.find(d => d.id === deviceId);
   const content = device?.content ?? null;
   const [copied, setCopied] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+
+  // I own a device when its ownerId is mine (or absent, on legacy payloads).
+  const isOwner = !!device && (device.ownerId === undefined || device.ownerId === userId);
+  const canShare = isOwner && device?.kind === 'display';
 
   function copyBody() {
     if (!content) return;
@@ -43,10 +51,23 @@ export default function DeviceView({ deviceId, device: deviceProp }: Props) {
   if (!content) {
     return (
       <div className="main display-view">
+        {(canShare || device?.ownerEmail) && (
+          <div className="device-info-bar">
+            {device?.ownerEmail && <span className="shared-by">Shared by {device.ownerEmail}</span>}
+            <span className="device-info-actions">
+              {canShare && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setShowShare(true)} title="Share this display">
+                  Share{device?.sharedWith?.length ? ` (${device.sharedWith.length})` : ''}
+                </button>
+              )}
+            </span>
+          </div>
+        )}
         <div className="waiting">
           <div className="device-name">{device?.name ?? deviceId}</div>
           <p><span className="pulse" />Waiting for content...</p>
         </div>
+        {canShare && showShare && device && <ShareModal device={device} onClose={() => setShowShare(false)} />}
       </div>
     );
   }
@@ -61,7 +82,13 @@ export default function DeviceView({ deviceId, device: deviceProp }: Props) {
           {meta.label}
         </span>
         {detail && <span className="meta-detail">{detail}</span>}
+        {device?.ownerEmail && <span className="shared-by">Shared by {device.ownerEmail}</span>}
         <span className="device-info-actions">
+          {canShare && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowShare(true)} title="Share this display">
+              Share{device?.sharedWith?.length ? ` (${device.sharedWith.length})` : ''}
+            </button>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={copyBody} title="Copy content to clipboard">
             {copied ? 'Copied!' : 'Copy'}
           </button>
@@ -71,6 +98,7 @@ export default function DeviceView({ deviceId, device: deviceProp }: Props) {
         </span>
       </div>
       <ContentRenderer content={content} />
+      {canShare && showShare && device && <ShareModal device={device} onClose={() => setShowShare(false)} />}
     </div>
   );
 }

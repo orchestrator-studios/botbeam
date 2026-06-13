@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 
 export default function TabBar() {
-  const { displays, activeTab, switchTab, removeDevice, archiveDevice, resetDevices, addDevice, pinDevice, connected, pulsingTab, version } = useBotBeam();
+  const { displays, sharedDevices, activeTab, switchTab, removeDevice, archiveDevice, resetDevices, addDevice, pinDevice, connected, pulsingTab, version } = useBotBeam();
   const [showModal, setShowModal] = useState(false);
   const [closeTarget, setCloseTarget] = useState<{ id: string; name: string } | null>(null);
   const [showReset, setShowReset] = useState(false);
@@ -93,6 +93,29 @@ export default function TabBar() {
             Reset
           </button>
         )}
+
+        {sharedDevices.length > 0 && <span className="tab-divider" title="Shared with me" />}
+        {sharedDevices.map(d => (
+          <button
+            key={d.id}
+            className={`tab tab-shared ${activeTab === d.id ? 'active' : ''} ${pulsingTab === d.id ? 'tab-pulse' : ''}`}
+            onClick={() => switchTab(d.id)}
+            title={d.ownerEmail ? `Shared by ${d.ownerEmail} (view-only)` : 'Shared with me (view-only)'}
+          >
+            <span className="tab-shared-icon">{'\u{1F465}'}</span>
+            <span>{d.name}</span>
+            <span
+              className="tab-pin"
+              title={`Pin this browser to "${d.name}" (kiosk mode)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                pinDevice(d.id);
+              }}
+            >
+              {'\u{1F4CC}'}
+            </span>
+          </button>
+        ))}
       </nav>
 
       {/* New device modal */}
