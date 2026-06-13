@@ -52,8 +52,9 @@ export default function ShareModal({ device, onClose }: Props) {
       <div className="modal">
         <h2>Share "{device.name}"</h2>
         <p style={{ color: 'var(--text-muted)', margin: '0 0 16px', fontSize: '0.85rem' }}>
-          People you add see this display live and read-only. They need a BotBeam account;
-          it appears under "Shared with me" when they sign in.
+          Enter the email someone signed up to BotBeam with — it identifies their account,
+          it doesn't email them anything. They get a live, read-only view of this display
+          under their "Shared with me."
         </p>
 
         <div className="share-add">

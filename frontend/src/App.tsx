@@ -6,6 +6,7 @@ import Auth from './components/Auth';
 import DebugPanel from './components/DebugPanel';
 import LockboxPanel from './components/LockboxPanel';
 import PinnedView from './components/PinnedView';
+import Help from './components/Help';
 
 function AppContent() {
   const { user, authChecked, activeTab, pinnedId } = useBotBeam();
@@ -18,7 +19,7 @@ function AppContent() {
     <div className="app">
       <TabBar />
       <div className="app-body">
-        {activeTab === 'home' ? <Home /> : <DeviceView key={activeTab} deviceId={activeTab} />}
+        {activeTab === 'home' ? <Home /> : activeTab === 'help' ? <Help /> : <DeviceView key={activeTab} deviceId={activeTab} />}
       </div>
       <LockboxPanel />
       <DebugPanel />

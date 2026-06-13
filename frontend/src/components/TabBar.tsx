@@ -48,74 +48,88 @@ export default function TabBar() {
           <button className="tab-about" title="About BotBeam" onClick={handleAbout}>v{version}</button>
         </span>
 
+        {/* App navigation — chrome, deliberately NOT styled like the content tabs */}
         <button
-          className={`tab ${activeTab === 'home' ? 'active' : ''}`}
+          className={`nav-btn ${activeTab === 'home' ? 'active' : ''}`}
           onClick={() => switchTab('home')}
+          title="Home"
         >
-          Home
+          <span className="nav-btn-icon">{'\u{1F3E0}'}</span>Home
         </button>
 
-        {displays.map(d => (
-          <button
-            key={d.id}
-            className={`tab ${activeTab === d.id ? 'active' : ''} ${pulsingTab === d.id ? 'tab-pulse' : ''}`}
-            onClick={() => switchTab(d.id)}
-          >
-            <span>{d.name}</span>
-            <span
-              className="tab-pin"
-              title={`Pin this browser to "${d.name}" (kiosk mode)`}
-              onClick={(e) => {
-                e.stopPropagation();
-                pinDevice(d.id);
-              }}
+        {/* The content tab strip — displays are the only things that look like tabs.
+            This is the one region that scrolls when it overflows. */}
+        <div className="tab-strip">
+          {displays.map(d => (
+            <button
+              key={d.id}
+              className={`tab ${activeTab === d.id ? 'active' : ''} ${pulsingTab === d.id ? 'tab-pulse' : ''}`}
+              onClick={() => switchTab(d.id)}
             >
-              {'\u{1F4CC}'}
-            </span>
-            {!d.isDefault && (
+              <span>{d.name}</span>
               <span
-                className="tab-close"
-                title="Archive or delete tab"
+                className="tab-pin"
+                title={`Pin this browser to "${d.name}" (kiosk mode)`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setCloseTarget({ id: d.id, name: d.name });
+                  pinDevice(d.id);
                 }}
               >
-                &times;
+                {'\u{1F4CC}'}
               </span>
-            )}
-          </button>
-        ))}
+              {!d.isDefault && (
+                <span
+                  className="tab-close"
+                  title="Archive or delete tab"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCloseTarget({ id: d.id, name: d.name });
+                  }}
+                >
+                  &times;
+                </span>
+              )}
+            </button>
+          ))}
 
-        <button className="tab tab-add" onClick={() => setShowModal(true)}>+</button>
-        {displays.some(d => !d.isDefault) && (
-          <button className="tab tab-reset" title="Reset all tabs" onClick={() => setShowReset(true)}>
-            Reset
-          </button>
-        )}
+          <button className="tab tab-add" onClick={() => setShowModal(true)} title="New display">+</button>
+          {displays.some(d => !d.isDefault) && (
+            <button className="tab tab-reset" title="Reset all tabs" onClick={() => setShowReset(true)}>
+              Reset
+            </button>
+          )}
 
-        {sharedDevices.length > 0 && <span className="tab-divider" title="Shared with me" />}
-        {sharedDevices.map(d => (
-          <button
-            key={d.id}
-            className={`tab tab-shared ${activeTab === d.id ? 'active' : ''} ${pulsingTab === d.id ? 'tab-pulse' : ''}`}
-            onClick={() => switchTab(d.id)}
-            title={d.ownerEmail ? `Shared by ${d.ownerEmail} (view-only)` : 'Shared with me (view-only)'}
-          >
-            <span className="tab-shared-icon">{'\u{1F465}'}</span>
-            <span>{d.name}</span>
-            <span
-              className="tab-pin"
-              title={`Pin this browser to "${d.name}" (kiosk mode)`}
-              onClick={(e) => {
-                e.stopPropagation();
-                pinDevice(d.id);
-              }}
+          {sharedDevices.length > 0 && <span className="tab-divider" title="Shared with me" />}
+          {sharedDevices.map(d => (
+            <button
+              key={d.id}
+              className={`tab tab-shared ${activeTab === d.id ? 'active' : ''} ${pulsingTab === d.id ? 'tab-pulse' : ''}`}
+              onClick={() => switchTab(d.id)}
+              title={d.ownerEmail ? `Shared by ${d.ownerEmail} (view-only)` : 'Shared with me (view-only)'}
             >
-              {'\u{1F4CC}'}
-            </span>
-          </button>
-        ))}
+              <span className="tab-shared-icon">{'\u{1F465}'}</span>
+              <span>{d.name}</span>
+              <span
+                className="tab-pin"
+                title={`Pin this browser to "${d.name}" (kiosk mode)`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  pinDevice(d.id);
+                }}
+              >
+                {'\u{1F4CC}'}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          className={`nav-btn ${activeTab === 'help' ? 'active' : ''}`}
+          onClick={() => switchTab('help')}
+          title="Help & docs"
+        >
+          <span className="nav-btn-icon">{'\u{2753}'}</span>Help
+        </button>
       </nav>
 
       {/* New device modal */}

@@ -9,9 +9,10 @@ import DeviceCard from './DeviceCard';
 export default function Home() {
   const { devices, displays, switchTab, user, logout, unarchiveDevice } = useBotBeam();
   const [newToken, setNewToken] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [archived, setArchived] = useState<Device[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<Device | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const loadArchive = useCallback(() => {
     botbeamApi.getArchivedDevices().then(setArchived).catch(() => {});
@@ -37,16 +38,21 @@ export default function Home() {
     setNewToken(t.access_token);
   }
 
-  function copy(text: string) {
+  function copy(text: string, key: string) {
     navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
     });
   }
 
   const credsSnippet = newToken
     ? JSON.stringify({ base_url: settings.publicUrl, token: newToken }, null, 2)
     : null;
+
+  const skillInstall =
+    'git clone https://github.com/orchestrator-studios/botbeam\n' +
+    'cp -r botbeam/skill/botbeam ~/.claude/skills/botbeam';
+  const skillVerify = 'python ~/.claude/skills/botbeam/scripts/botbeam.py list';
 
   return (
     <div className="main home-view">
@@ -85,18 +91,73 @@ export default function Home() {
         )}
 
         <div className="token-panel">
-          <h2>Connect orchestra</h2>
-          <p>Mint a long-lived access token and save it to your creds file so the agent can beam to your displays.</p>
+          <button
+            className="token-panel-toggle"
+            onClick={() => setConnectOpen((o) => !o)}
+            aria-expanded={connectOpen}
+          >
+            <span className={`token-panel-caret ${connectOpen ? 'open' : ''}`}>▸</span>
+            <span className="token-panel-heading">
+              <strong>Connect an agent</strong>
+              <span className="token-panel-sub">Mint a token and wire up orchestra or Claude Code</span>
+            </span>
+          </button>
+
+          {connectOpen && (
+          <div className="token-panel-body">
+          <p>Mint a long-lived access token, then drop it in your creds file so orchestra or Claude Code can beam to your displays.</p>
           <button className="btn btn-primary" onClick={mint}>Mint a token</button>
 
           {credsSnippet && (
             <div className="token-reveal">
               <p>Save to <code>~/.config/orchestra/botbeam.json</code> — shown once:</p>
               <pre className="setup-codeblock"><code>{credsSnippet}</code></pre>
-              <button className="btn btn-primary btn-copy" onClick={() => copy(credsSnippet)}>
-                {copied ? 'Copied!' : 'Copy'}
+              <button className="btn btn-primary btn-copy" onClick={() => copy(credsSnippet, 'creds')}>
+                {copied === 'creds' ? 'Copied!' : 'Copy'}
               </button>
             </div>
+          )}
+
+          <div className="setup-clients">
+            <div className="setup-client">
+              <h3>orchestra</h3>
+              <p>
+                Enable the bundled <code>botbeam</code> skill. It reads the creds file above automatically —
+                nothing else to install.
+              </p>
+            </div>
+
+            <div className="setup-client">
+              <h3>Claude Code</h3>
+              <ol className="setup-steps">
+                <li>
+                  Install the skill into your skills directory (Python 3 only, no third-party deps):
+                  <pre className="setup-codeblock"><code>{skillInstall}</code></pre>
+                  <button className="btn btn-ghost btn-copy" onClick={() => copy(skillInstall, 'install')}>
+                    {copied === 'install' ? 'Copied!' : 'Copy'}
+                  </button>
+                </li>
+                <li>Mint a token above and save it to <code>~/.config/orchestra/botbeam.json</code>.</li>
+                <li>
+                  Verify the connection:
+                  <pre className="setup-codeblock"><code>{skillVerify}</code></pre>
+                  <button className="btn btn-ghost btn-copy" onClick={() => copy(skillVerify, 'verify')}>
+                    {copied === 'verify' ? 'Copied!' : 'Copy'}
+                  </button>
+                </li>
+                <li>
+                  That's it. For ways to use BotBeam and answers to common questions, see the{' '}
+                  <button className="link-inline" onClick={() => switchTab('help')}>Help</button> section.
+                </li>
+              </ol>
+            </div>
+          </div>
+
+          <p className="setup-more">
+            New here? The <button className="link-inline" onClick={() => switchTab('help')}>Help</button> tab
+            explains what BotBeam is for, with examples and an FAQ.
+          </p>
+          </div>
           )}
         </div>
       </div>

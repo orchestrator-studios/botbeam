@@ -6,6 +6,12 @@ distinct service calls — beam_default (upsert the default's content),
 beam_new (create, name must be free), beam_existing (replace content by id).
 Names are unique per user; the agent resolves spoken names to ids via list().
 """
+# Defer annotation evaluation to strings (PEP 563). This class defines a `list`
+# method that would otherwise shadow the builtin when later methods' annotations
+# (e.g. `-> list[dict]`) are evaluated eagerly at class-body time on Python <3.14,
+# crashing import with "'function' object is not subscriptable".
+from __future__ import annotations
+
 import json
 import logging
 import secrets
