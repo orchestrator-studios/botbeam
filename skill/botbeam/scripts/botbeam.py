@@ -10,7 +10,9 @@ Stdlib only — no third-party deps.
 Model: one user-scoped key-value store of "devices". Each device is either a
 'display' (rendered as a live tab the user watches) or a 'lockbox' (stashed
 off-screen, retrieved on demand). Every user has one default display that always
-exists; beam with no --device targets it. Names are unique per user.
+exists. The three beams mirror the API: `beam` (beam_default, the main display),
+`new` (beam_new, create), `existing` (beam_existing, update by id) — an id is
+needed only for `existing`. Names are unique per user.
 """
 import argparse
 import json
@@ -89,12 +91,16 @@ def main():
     ls.add_argument("--archived", action="store_true", help="Show the archive instead of active entries.")
     ls.add_argument("--summary", action="store_true", help="Omit content bodies (cheaper for scanning).")
 
-    bm = sub.add_parser("beam", help="Put content on the main display (or --device to update an existing entry).")
-    bm.add_argument("--device", help="Target an existing entry by id (default: the main display).")
+    bm = sub.add_parser("beam", help="Beam content to the main display (beam_default). The common case — no id.")
     bm.add_argument("--type", choices=CONTENT_TYPES, required=True)
     bm.add_argument("--body", required=True)
 
-    nw = sub.add_parser("new", help="Create a new named entry, optionally with content.")
+    ex = sub.add_parser("existing", help="Replace content on an existing entry by id (beam_existing). The only beam that needs an id.")
+    ex.add_argument("--device", required=True)
+    ex.add_argument("--type", choices=CONTENT_TYPES, required=True)
+    ex.add_argument("--body", required=True)
+
+    nw = sub.add_parser("new", help="Create a new named entry, optionally with content (beam_new).")
     nw.add_argument("--name")
     nw.add_argument("--description")
     nw.add_argument("--kind", choices=KINDS, default="display")
@@ -139,8 +145,11 @@ def main():
 
     elif args.cmd == "beam":
         content = {"type": args.type, "body": args.body}
-        path = f"/api/devices/{args.device}/content" if args.device else "/api/devices/default/content"
-        _print(api("PUT", path, content))
+        _print(api("PUT", "/api/devices/default/content", content))
+
+    elif args.cmd == "existing":
+        content = {"type": args.type, "body": args.body}
+        _print(api("PUT", f"/api/devices/{args.device}/content", content))
 
     elif args.cmd == "new":
         body = {"name": args.name, "kind": args.kind, "description": args.description}

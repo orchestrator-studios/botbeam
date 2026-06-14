@@ -153,7 +153,7 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
 
   const addDevice = useCallback(async (name: string) => {
     if (!user) return;
-    await botbeamApi.createDevice(name);
+    await botbeamApi.beamNew(name);
   }, [user]);
 
   const removeDevice = useCallback(async (id: string) => {

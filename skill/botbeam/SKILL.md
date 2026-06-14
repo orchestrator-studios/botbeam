@@ -12,7 +12,7 @@ The **companion-UX capability** — orchestra's auxiliary surface, the displays 
 
 One **user-scoped key-value store**. Each entry ("device") is one of two **kinds**:
 
-- **`display`** — rendered live as a **tab** the user watches in the browser. Every user has one **default display** ("Main") that always exists; `beam` with no `--device` targets it.
+- **`display`** — rendered live as a **tab** the user watches in the browser. Every user has one **default display** ("Main") that always exists; bare `beam` targets it (no id needed).
 - **`lockbox`** — **stashed off-screen**: it appears in the user's lockbox panel, not the tab strip, and is retrieved on demand. Use for "save/cache this for later" and cross-context handoffs (stash in one session, read in another — same account).
 
 Names are unique per user — resolve a user-spoken name to an `id` with `list`. Every entry can carry an optional **`description`**: a one-line summary, especially important for lockboxes (which aren't rendered, so the listing is all the user sees).
@@ -32,12 +32,12 @@ Rule of thumb: **if you'd want it up on a screen in the room rather than spoken 
 
 A few shapes this takes:
 - *"Summarize these five reports."* → beam a `markdown` brief (or a `dashboard` of the key numbers) and talk the user through it, instead of dumping it inline.
-- *"Track the migration as it runs."* → beam a `dashboard`/`list` and `beam --device <id>` to refresh it in place as each step completes.
+- *"Track the migration as it runs."* → beam a `dashboard`/`list` and `existing --device <id>` to refresh it in place as each step completes.
 - *"Keep this comparison handy for the call."* → `stash` it to a lockbox so it's there later without cluttering the screen now.
 
 ## Access
 
-- one bundled script over the REST API: `python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py <command> [flags]` (stdlib only). Commands: `list`, `beam`, `new`, `stash`, `clear`, `rename`, `archive`, `unarchive`, `delete`, `reset`.
+- one bundled script over the REST API: `python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py <command> [flags]` (stdlib only). Commands: `list`, `beam`, `new`, `existing`, `stash`, `clear`, `rename`, `archive`, `unarchive`, `delete`, `reset`.
 - **Where the data lives:** your BotBeam account, reached at the **`botbeam`** resource's base URL in `${CLAUDE_PLUGIN_ROOT}/resources.md`. The namespace is resolved from your token server-side — never in the URL.
 - **Credential** — a per-user **agent token** (a JWT), minted in the BotBeam UI:
   ```text
@@ -74,8 +74,9 @@ A few shapes this takes:
 ## Rules / know-how
 
 - **Beam vs. stash.** Beam when the user wants something **on screen now** (a dashboard, a table, a live view). Stash when they want it **saved for later** ("hold onto this", "cache that", "stash it") — it goes to a lockbox, not a tab, so it won't disturb what's on their display.
-- **The main display.** `beam --type … --body …` (no `--device`) updates the user's default display in place — the simplest "put this on my screen."
-- **Reuse, don't pile up.** `list` first. To update an existing entry, `beam --device <id>`. Keep names short and stable ("OKRs", "Pipeline").
+- **Three beams, mirroring the API — an id only when you truly need one.** `beam` (→ `beam_default`) puts content on the **Main** display; it's the common case and takes no id. `new` (→ `beam_new`) creates a fresh named entry. `existing --device <id>` (→ `beam_existing`) replaces content on a specific entry — the **only** beam that needs an id.
+- **The main display.** `beam --type … --body …` updates the user's default display in place — the simplest "put this on my screen."
+- **Reuse, don't pile up.** `list` first. To update an existing entry, resolve its id and `existing --device <id>`. Keep names short and stable ("OKRs", "Pipeline").
 - **Describe what you stash.** Always give a lockbox a clear `--description` (e.g. "Search results for X, cached today") — the user picks lockboxes from a list of names + descriptions.
 - **Pick the right content type.** KPI cards → `dashboard`; rows/records → `table`; prose/notes → `markdown`; a live external page → `url`; a checklist → `list`.
 - **Derive, don't dump.** A beamed view is usually built *from* a substrate — compose it, then beam the result.
@@ -96,8 +97,8 @@ python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py beam --type dashboard \
 python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py new --name "Pipeline" --type table \
   --body '{"columns":[{"id":"deal","label":"Deal"}],"rows":[{"deal":"Acme"}]}'
 
-# update an existing entry in place (live-refreshes the browser)
-python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py beam --device <id> --type markdown --body '# Updated'
+# update an existing entry in place by id (live-refreshes the browser)
+python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py existing --device <id> --type markdown --body '# Updated'
 
 # stash search results in a lockbox for later
 python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py stash --name "ACME research" \
@@ -115,9 +116,9 @@ python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py reset
 
 ## FAQ
 
-- **Where does what I beam show up?** No `--device` → the user's **Main** display (updated in place). `new --name …` → a new named **tab**. `stash` → a **lockbox** in the side panel, not a tab. All live-refresh the browser over WebSocket.
+- **Where does what I beam show up?** `beam` → the user's **Main** display (updated in place). `new --name …` → a new named **tab**. `existing --device <id>` → that specific entry. `stash` → a **lockbox** in the side panel, not a tab. All live-refresh the browser over WebSocket.
 - **Beam or stash?** Beam = on screen now. Stash = saved for later / handed off to another session (same account) without touching what's on screen. Same store either way — it's purely presentation.
-- **Will I clobber what's already up?** `beam --device <id>` replaces *that* entry's content only. `clear` blanks an entry but keeps it; `archive` takes it off the strip (restorable); `delete` removes one; **`reset` wipes everything** (Main survives, cleared) — so confirm before reset.
+- **Will I clobber what's already up?** `existing --device <id>` replaces *that* entry's content only. `clear` blanks an entry but keeps it; `archive` takes it off the strip (restorable); `delete` removes one; **`reset` wipes everything** (Main survives, cleared) — so confirm before reset.
 - **Can someone else see a display?** Yes — from the BotBeam UI the owner can **share a display (view-only)** with another BotBeam account by email; it shows up under that user's **"Shared with me"** and tracks the owner's beams live. Sharing is a UI action; the skill itself only reads/writes the owner's own devices.
 - **Can I dedicate a screen to one display?** Yes — **pin** it (the 📌 on a tab, or open `…/?pin=<name>`). That browser then shows only that display, kiosk-style, and won't follow beams to other tabs — handy for a wall screen, a meeting room, or a kitchen display. Unpin from the bar.
 - **Something's off — 401 / can't reach BotBeam / nothing updates.** `401` → re-mint the token. "Cannot reach" → check `base_url` / host. No live update though content changed → the browser may be pointed at a *different* host than the skill is beaming to (they can share a DB but not live updates) — confirm both use the same base URL.

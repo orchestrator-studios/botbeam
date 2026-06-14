@@ -32,7 +32,8 @@ export const botbeamApi = {
   // Single device by id — returns archived devices too (used by the pinned view).
   getDevice: (id: string): Promise<Device> => get<Device>(`/api/devices/${id}`),
   getArchivedDevices: (): Promise<Device[]> => get<Device[]>('/api/devices?archived=true'),
-  createDevice: (name: string): Promise<Device> => post<Device>('/api/devices', { name }),
+  // beam_new — create a new entry (browser sends name only; the agent/skill may include content)
+  beamNew: (name: string): Promise<Device> => post<Device>('/api/devices', { name }),
   renameDevice: (id: string, name: string): Promise<Device> =>
     patch<Device>(`/api/devices/${id}`, { name }),
   archiveDevice: (id: string): Promise<Device> => post<Device>(`/api/devices/${id}/archive`),
