@@ -1,6 +1,6 @@
 ---
 name: botbeam
-description: Beam rich content to the user's BotBeam displays, or stash it in a lockbox for later — push a dashboard, table, markdown, html, url, image, or list to a display tab the user watches in a browser, or save a payload off-screen that the user (or another of their agents, in another context) can retrieve later. Use when the user asks to "beam" something, "put that on my display / screen / BotBeam," or to "stash" / "save" / "cache" something for later.
+description: Beam rich content to the user's BotBeam displays, stash it in a lockbox for later, or remember durable typed facts and recall them later — push a dashboard, table, markdown, html, url, image, or list to a display tab the user watches in a browser; save a payload off-screen that the user (or another of their agents, in another context) can retrieve later; or persist a small titled fact the agent recalls across sessions. Use when the user asks to "beam" something, "put that on my display / screen / BotBeam," to "stash" / "save" / "cache" something for later, or to "remember" / "recall" a fact.
 allowed-tools: Bash(python *)
 ---
 
@@ -16,6 +16,8 @@ One **user-scoped key-value store**. Each entry ("device") is one of two **kinds
 - **`lockbox`** — **stashed off-screen**: it appears in the user's lockbox panel, not the tab strip, and is retrieved on demand. Use for "save/cache this for later" and cross-context handoffs (stash in one session, read in another — same account).
 
 Names are unique per user — resolve a user-spoken name to an `id` with `list`. Every entry can carry an optional **`description`**: a one-line summary, especially important for lockboxes (which aren't rendered, so the listing is all the user sees).
+
+Alongside the device store there's a **second store for [memory](#memory--durable-typed-facts)** — durable, typed facts the agent remembers and recalls (`recall` / `remember`), addressed by a stable `key` rather than rendered or stashed.
 
 ## When to reach for it — presentation mode
 
@@ -37,7 +39,7 @@ A few shapes this takes:
 
 ## Access
 
-- one bundled script over the REST API: `python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py <command> [flags]` (stdlib only). Commands: `list`, `beam`, `new`, `existing`, `stash`, `clear`, `rename`, `archive`, `unarchive`, `delete`, `reset`.
+- one bundled script over the REST API: `python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py <command> [flags]` (stdlib only). Commands: `list`, `beam`, `new`, `existing`, `stash`, `clear`, `rename`, `archive`, `unarchive`, `delete`, `reset`; memory: `recall`, `read`, `remember`, `forget`, `forget-all`.
 - **Where the data lives:** your BotBeam account, reached at the **`botbeam`** resource's base URL in `${CLAUDE_PLUGIN_ROOT}/resources.md`. The namespace is resolved from your token server-side — never in the URL.
 - **Credential** — a per-user **agent token** (a JWT), minted in the BotBeam UI:
   ```text
@@ -114,6 +116,30 @@ python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py delete --device <id>
 python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py reset
 ```
 
+## Memory — durable, typed facts
+
+A **separate store** from devices (its own `/api/memories` resource): small, titled facts the agent **remembers** and **recalls** across sessions — not rendered on screen, not a one-off payload. Think of it as the agent's notebook about the user and their work, the way Claude Code keeps memory files.
+
+- **A memory** is `key` + `category` + `body`, plus an optional one-line `description` (shown when recalling). `key` is a **stable per-user handle** you choose (a slug like `prefers-dark-mode`); writing the same key again **replaces** it (upsert).
+- **Categories** (`--category`): `user` (who they are / preferences), `project` (ongoing work, goals, constraints), `reference` (pointers to external resources), `feedback` (how they want you to work), `note` (the default catch-all).
+- **Memory vs. lockbox.** A **lockbox** stashes a *payload* to retrieve whole later (search results, a draft). A **memory** is a *fact you accumulate and recall by relevance* — keep it small (there's a 64 KB cap; stash big blobs in a lockbox). Memory isn't shown on a display.
+- **Recall before you act**, and **prune** what's stale — the user reviews and curates these in the BotBeam UI's **Memory** tab, so keep keys and descriptions clean and self-explanatory.
+
+```bash
+# recall — list everything, or text-search across key/description/body; filter by category
+python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py recall
+python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py recall --q "dark mode" --category user
+
+# remember — upsert a fact by key (create or replace)
+python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py remember --key "prefers-dark-mode" --category user \
+  --description "UI preference" --body "Cliff prefers dark mode in all tools."
+
+# read one in full · forget one · forget everything (confirm first)
+python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py read --key "prefers-dark-mode"
+python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py forget --key "prefers-dark-mode"
+python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py forget-all
+```
+
 ## FAQ
 
 - **Where does what I beam show up?** `beam` → the user's **Main** display (updated in place). `new --name …` → a new named **tab**. `existing --device <id>` → that specific entry. `stash` → a **lockbox** in the side panel, not a tab. All live-refresh the browser over WebSocket.
@@ -121,6 +147,7 @@ python ${CLAUDE_SKILL_DIR}/scripts/botbeam.py reset
 - **Will I clobber what's already up?** `existing --device <id>` replaces *that* entry's content only. `clear` blanks an entry but keeps it; `archive` takes it off the strip (restorable); `delete` removes one; **`reset` wipes everything** (Main survives, cleared) — so confirm before reset.
 - **Can someone else see a display?** Yes — from the BotBeam UI the owner can **share a display (view-only)** with another BotBeam account by email; it shows up under that user's **"Shared with me"** and tracks the owner's beams live. Sharing is a UI action; the skill itself only reads/writes the owner's own devices.
 - **Can I dedicate a screen to one display?** Yes — **pin** it (the 📌 on a tab, or open `…/?pin=<name>`). That browser then shows only that display, kiosk-style, and won't follow beams to other tabs — handy for a wall screen, a meeting room, or a kitchen display. Unpin from the bar.
+- **Beam/stash or remember?** Beam = show it now; stash = keep a payload to retrieve whole later; **remember** = a small durable *fact* to recall by relevance across sessions (`recall` → `read`). Memory is its own store — not a tab, not a lockbox — and the user prunes it in the BotBeam **Memory** tab.
 - **Something's off — 401 / can't reach BotBeam / nothing updates.** `401` → re-mint the token. "Cannot reach" → check `base_url` / host. No live update though content changed → the browser may be pointed at a *different* host than the skill is beaming to (they can share a DB but not live updates) — confirm both use the same base URL.
 
 ## Notes

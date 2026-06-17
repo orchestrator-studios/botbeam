@@ -9,7 +9,7 @@ from jose import jwt, JWTError
 from config.settings import settings
 from database import init_async_db, AsyncSessionLocal
 from services.user_service import UserService
-from routers import auth as auth_router, devices as devices_router
+from routers import auth as auth_router, devices as devices_router, memories as memories_router
 from websocket import manager
 from config.logging_config import setup_logging
 from middleware import LoggingMiddleware
@@ -34,6 +34,7 @@ app.add_middleware(
 
 app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
 app.include_router(devices_router.router, prefix="/api", tags=["devices"])
+app.include_router(memories_router.router, prefix="/api", tags=["memories"])
 
 
 @app.on_event("startup")

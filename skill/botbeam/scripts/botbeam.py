@@ -21,9 +21,11 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote
 
 CONTENT_TYPES = ["text", "markdown", "html", "url", "image", "list", "dashboard", "table", "json"]
 KINDS = ["display", "lockbox"]
+MEMORY_CATEGORIES = ["user", "project", "reference", "feedback", "note"]
 
 
 def load_creds():
@@ -131,6 +133,25 @@ def main():
 
     sub.add_parser("reset", help="Delete ALL entries (the default display survives, cleared).")
 
+    # ── memory: durable, typed facts the agent remembers and recalls (separate from devices) ──
+    rc = sub.add_parser("recall", help="Recall memories — list or text-search (summaries, no body).")
+    rc.add_argument("--q", help="Text search across key / description / body.")
+    rc.add_argument("--category", choices=MEMORY_CATEGORIES, help="Filter to one category.")
+
+    rd = sub.add_parser("read", help="Read one memory in full, by key.")
+    rd.add_argument("--key", required=True)
+
+    rm = sub.add_parser("remember", help="Store a memory (upsert by key — create or replace).")
+    rm.add_argument("--key", required=True)
+    rm.add_argument("--category", choices=MEMORY_CATEGORIES, help="Defaults to 'note'.")
+    rm.add_argument("--description", help="One-line summary, shown in recall listings.")
+    rm.add_argument("--body", required=True)
+
+    fg = sub.add_parser("forget", help="Delete one memory, by key.")
+    fg.add_argument("--key", required=True)
+
+    sub.add_parser("forget-all", help="Delete ALL memories (confirm with the user first).")
+
     args = p.parse_args()
 
     if args.cmd == "list":
@@ -183,6 +204,35 @@ def main():
     elif args.cmd == "reset":
         api("DELETE", "/api/devices")
         print("All entries cleared (default display kept).")
+
+    # ── memory ──
+
+    elif args.cmd == "recall":
+        params = []
+        if args.q:
+            params.append("q=" + quote(args.q))
+        if args.category:
+            params.append("category=" + args.category)
+        _print(api("GET", "/api/memories" + (("?" + "&".join(params)) if params else "")))
+
+    elif args.cmd == "read":
+        _print(api("GET", f"/api/memories/{quote(args.key, safe='')}"))
+
+    elif args.cmd == "remember":
+        body = {"body": args.body}
+        if args.category:
+            body["category"] = args.category
+        if args.description:
+            body["description"] = args.description
+        _print(api("PUT", f"/api/memories/{quote(args.key, safe='')}", body))
+
+    elif args.cmd == "forget":
+        api("DELETE", f"/api/memories/{quote(args.key, safe='')}")
+        print(f"Forgot {args.key}")
+
+    elif args.cmd == "forget-all":
+        api("DELETE", "/api/memories")
+        print("All memories cleared.")
 
 
 if __name__ == "__main__":

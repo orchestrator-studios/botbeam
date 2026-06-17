@@ -53,6 +53,26 @@ export interface DeviceSummary {
   createdAt: string;
 }
 
+// ── Memories ──
+export type MemoryCategory = 'user' | 'project' | 'reference' | 'feedback' | 'note';
+
+export interface Memory {
+  key: string;
+  category: MemoryCategory;
+  description?: string | null;
+  body: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+// Recall listing — no body (the agent's list/search shape).
+export interface MemorySummary {
+  key: string;
+  category: MemoryCategory;
+  description?: string | null;
+  updatedAt?: string | null;
+}
+
 // ── Content body shapes (frontend-only — parsed from DeviceContent.body JSON) ──
 export interface ListItem {
   text: string;

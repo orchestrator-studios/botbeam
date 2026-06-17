@@ -54,6 +54,13 @@ export const patch = <T>(url: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
+export const put = <T>(url: string, body?: unknown) =>
+  req<T>(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
 export const del = async (url: string): Promise<void> => {
   const res = await fetch(`${settings.apiUrl}${url}`, { method: 'DELETE', headers: withAuth() });
   if (!res.ok && res.status !== 404) {

@@ -1,6 +1,6 @@
-import { get, post, patch, del, delJson } from './index';
+import { get, post, patch, put, del, delJson } from './index';
 import { settings } from '../../config/settings';
-import type { Device, User } from '../../types';
+import type { Device, User, Memory, MemorySummary, MemoryCategory } from '../../types';
 
 // ── request/response wrappers (specific to these endpoints, not domain objects;
 // names mirror backend/routers/auth.py) ──
@@ -40,6 +40,22 @@ export const botbeamApi = {
   unarchiveDevice: (id: string): Promise<Device> => post<Device>(`/api/devices/${id}/unarchive`),
   deleteDevice: (id: string): Promise<void> => del(`/api/devices/${id}`),
   resetDevices: (): Promise<void> => del('/api/devices'),
+
+  // ── Memories (durable typed facts; recalled by list / get / text search) ──
+  getMemories: (q?: string, category?: string): Promise<MemorySummary[]> => {
+    const p = new URLSearchParams();
+    if (q) p.set('q', q);
+    if (category) p.set('category', category);
+    const qs = p.toString();
+    return get<MemorySummary[]>(`/api/memories${qs ? `?${qs}` : ''}`);
+  },
+  getMemory: (key: string): Promise<Memory> => get<Memory>(`/api/memories/${encodeURIComponent(key)}`),
+  putMemory: (
+    key: string,
+    payload: { category?: MemoryCategory; description?: string; body: string },
+  ): Promise<Memory> => put<Memory>(`/api/memories/${encodeURIComponent(key)}`, payload),
+  deleteMemory: (key: string): Promise<void> => del(`/api/memories/${encodeURIComponent(key)}`),
+  resetMemories: (): Promise<void> => del('/api/memories'),
 
   // ── Sharing (view-only grants to other accounts) ──
   getSharedDevices: (): Promise<Device[]> => get<Device[]>('/api/devices/shared'),

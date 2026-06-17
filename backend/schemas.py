@@ -65,3 +65,27 @@ class DeviceSummary(BaseModel):
     contentType: Optional[ContentType] = None
     contentUpdatedAt: Optional[str] = None
     createdAt: Optional[str] = None
+
+
+# ── Memories ──
+MemoryCategory = Literal["user", "project", "reference", "feedback", "note"]
+
+
+class Memory(BaseModel):
+    """A durable, typed fact (matches memory_service.serialize())."""
+    model_config = ConfigDict(extra="forbid")
+    key: str
+    category: MemoryCategory
+    description: Optional[str] = None
+    body: str
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
+
+
+class MemorySummary(BaseModel):
+    """Recall listing — no body (matches memory_service.summarize())."""
+    model_config = ConfigDict(extra="forbid")
+    key: str
+    category: MemoryCategory
+    description: Optional[str] = None
+    updatedAt: Optional[str] = None

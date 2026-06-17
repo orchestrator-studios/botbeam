@@ -104,3 +104,31 @@ class DeviceShare(Base):
     device_id = Column(String(16), ForeignKey("devices.id", ondelete="CASCADE"), index=True, nullable=False)
     grantee_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Memory(Base):
+    """A durable, typed fact the user's agent writes and recalls later.
+
+    Distinct from a Device: a memory isn't rendered (no tab) and isn't a one-off
+    payload (lockbox) — it's a small, titled fact that accumulates and is recalled
+    by relevance. Scoped directly to its owner.
+
+    `key` is the stable public handle (unique per user, case-insensitive via
+    utf8mb4_unicode_ci) the agent addresses and upserts by. `category` buckets it
+    (see schemas.MemoryCategory); `description` is a one-line summary used for cheap
+    recall listings (the body isn't returned when listing/searching).
+    """
+    __tablename__ = "memories"
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_memory_user_key"),
+        _UTF8MB4,
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
+    key = Column(String(255), nullable=False)              # stable public handle (the API/skill addresses by this)
+    category = Column(String(32), default="note", nullable=False)
+    description = Column(Text, nullable=True)              # one-line summary for recall listings
+    body = Column(LONGTEXT, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
