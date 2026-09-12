@@ -9,7 +9,7 @@ from jose import jwt, JWTError
 from config.settings import settings
 from database import init_async_db, AsyncSessionLocal
 from services.user_service import UserService
-from routers import auth as auth_router, devices as devices_router, memories as memories_router
+from routers import auth as auth_router, devices as devices_router, memories as memories_router, ledger as ledger_router
 from websocket import manager
 from config.logging_config import setup_logging
 from middleware import LoggingMiddleware
@@ -35,6 +35,7 @@ app.add_middleware(
 app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
 app.include_router(devices_router.router, prefix="/api", tags=["devices"])
 app.include_router(memories_router.router, prefix="/api", tags=["memories"])
+app.include_router(ledger_router.router, prefix="/ledger", tags=["ledger"])
 
 
 @app.on_event("startup")
@@ -89,7 +90,7 @@ if _dist.exists():
 
     @app.get("/{full_path:path}")
     async def spa(full_path: str):
-        if full_path.startswith(("api/", "auth/", "ws")):
+        if full_path.startswith(("api/", "auth/", "ws", "ledger/")):
             return JSONResponse({"detail": "Not found"}, status_code=404)
         index = _dist / "index.html"
         if index.exists():

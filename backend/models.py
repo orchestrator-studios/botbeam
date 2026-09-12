@@ -106,6 +106,36 @@ class DeviceShare(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class LedgerSession(Base):
+    """One Claude Code session's stored facts — the ledger's telemetry plane.
+
+    Facts only, per The Ledger Book (woodshed docs/ledger/): statuses — active /
+    dormant / archived / expired, waiting / processing / run, relevant — are never
+    stored. The ledger service derives them from these columns on every read, so a
+    wrong picture lasts exactly until the next signal. Scoped to the owner like
+    every other row; written only by LedgerService from hook signals, archive
+    calls, and sweep reports.
+    """
+    __tablename__ = "ledger_sessions"
+    __table_args__ = _UTF8MB4
+
+    id = Column(String(36), primary_key=True)                # the Claude Code session uuid
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
+    workspace_id = Column(String(512), nullable=True)        # directory the session runs in (its workspace's id)
+    machine = Column(String(128), nullable=True)
+    label = Column(String(255), nullable=True)               # workspace basename + short session id
+    first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_event_at = Column(DateTime, default=datetime.utcnow, nullable=False)   # heartbeat: every signal
+    last_prompt_at = Column(DateTime, nullable=True)         # UserPromptSubmit
+    last_stop_at = Column(DateTime, nullable=True)           # Stop — vs last_prompt_at decides waiting/processing
+    last_run_at = Column(DateTime, nullable=True)            # PostToolUse with a mutating tool — the ⚡
+    ended_at = Column(DateTime, nullable=True)               # SessionEnd; an event after it derives a reopen
+    ever_prompted = Column(Boolean, default=False, nullable=False)  # relevance gate — filters picker ghosts
+    archived_at = Column(DateTime, nullable=True)            # user dismissal; an event after it derives un-archive
+    transcript_missing_since = Column(DateTime, nullable=True)      # first consecutive sweep miss
+    sweep_miss_count = Column(Integer, default=0, nullable=False)   # consecutive misses; expiry at N
+
+
 class Memory(Base):
     """A durable, typed fact the user's agent writes and recalls later.
 

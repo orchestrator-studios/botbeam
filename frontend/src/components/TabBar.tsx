@@ -124,6 +124,14 @@ export default function TabBar() {
         </div>
 
         <button
+          className={`nav-btn ${activeTab === 'sessions' ? 'active' : ''}`}
+          onClick={() => switchTab('sessions')}
+          title="Sessions — your Claude Code sessions, live"
+        >
+          <span className="nav-btn-icon">{'\u{1F7E2}'}</span>Sessions
+        </button>
+
+        <button
           className={`nav-btn ${activeTab === 'memory' ? 'active' : ''}`}
           onClick={() => switchTab('memory')}
           title="Memory — durable facts your agent recalls"

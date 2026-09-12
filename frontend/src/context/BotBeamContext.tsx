@@ -25,6 +25,8 @@ interface BotBeamContextType {
   connected: boolean;
   pulsingTab: string | null;
   version: string;
+  // Bumped on every ledger_sessions WS event — the Sessions view refetches on change.
+  ledgerBump: number;
 
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
@@ -94,6 +96,7 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [pulsingTab, setPulsingTab] = useState<string | null>(null);
   const [version, setVersion] = useState('');
+  const [ledgerBump, setLedgerBump] = useState(0);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
   const initialVersion = useRef('');
@@ -357,6 +360,10 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
             refreshState().catch(() => setDevices([]));
             setActiveTab('home');
             break;
+          case 'ledger_sessions':
+            // A session fact changed somewhere — the Sessions view refetches the board.
+            setLedgerBump((b) => b + 1);
+            break;
         }
 
         setWsLog((prev) => [...prev, {
@@ -418,6 +425,7 @@ export function BotBeamProvider({ children }: { children: ReactNode }) {
     connected,
     pulsingTab,
     version,
+    ledgerBump,
     login,
     register,
     logout,

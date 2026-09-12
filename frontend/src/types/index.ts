@@ -73,6 +73,40 @@ export interface MemorySummary {
   updatedAt?: string | null;
 }
 
+// ── Ledger sessions (the telemetry plane — The Ledger Book, phase 1) ──
+// The wire representation from /ledger: stored facts (snake_case, matching the
+// service) plus the derived fields, which are computed per read and never stored.
+export type LedgerStatus = 'active' | 'dormant' | 'archived' | 'expired';
+export type LedgerActivity = 'waiting' | 'processing' | 'run' | null;
+
+export interface LedgerSession {
+  id: string;
+  workspace_id: string | null;
+  machine: string | null;
+  label: string | null;
+  first_seen: string | null;
+  last_event_at: string | null;
+  last_prompt_at: string | null;
+  last_stop_at: string | null;
+  last_run_at: string | null;
+  ended_at: string | null;
+  ever_prompted: boolean;
+  archived_at: string | null;
+  transcript_missing_since: string | null;
+  status: LedgerStatus;       // derived
+  activity: LedgerActivity;   // derived — active sessions only
+  relevant: boolean;          // derived
+}
+
+// GET /ledger/board — the data structure the board view renders.
+// Events and products are empty until the record plane lands (phase 2).
+export interface LedgerBoard {
+  sessions: LedgerSession[];
+  events: unknown[];
+  products: unknown[];
+  as_of: string;
+}
+
 // ── Content body shapes (frontend-only — parsed from DeviceContent.body JSON) ──
 export interface ListItem {
   text: string;
@@ -104,4 +138,5 @@ export type WSEvent =
   | { event: 'device_unarchived'; device: Device }
   | { event: 'device_shared'; device: Device }      // a device was shared with me
   | { event: 'device_unshared'; deviceId: string }  // my access to a shared device was revoked
-  | { event: 'devices_reset' };
+  | { event: 'devices_reset' }
+  | { event: 'ledger_sessions' };                   // any ledger session changed — refetch the board

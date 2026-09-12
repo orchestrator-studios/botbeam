@@ -2292,3 +2292,36 @@ table.content-table {
   line-height: 1.55;
   color: var(--text);
 }
+
+/* ── Sessions view (the ledger board — sessions plane, phase 1) ──
+   Glyphs follow the Ledger Book's cheat sheet: solid green = processing,
+   +bolt = run, hollow ring = waiting, gray = dormant. */
+.ledger-view { overflow-y: auto; }
+.ledger-content { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
+.ledger-head h1 { font-size: 1.6rem; margin-bottom: 6px; }
+.ledger-head p { color: var(--text-muted); margin-bottom: 12px; max-width: 68ch; }
+.ledger-clear { margin-bottom: 16px; }
+.ledger-empty { color: var(--text-muted); padding: 24px 0; }
+.ledger-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ledger-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border: 1px solid var(--border, rgba(128,128,128,0.25));
+  border-radius: 10px; background: var(--surface, rgba(128,128,128,0.06));
+}
+.ledger-card.dormant { opacity: 0.66; }
+.ledger-glyph { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.ledger-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; display: inline-block; }
+.ledger-dot.processing { background: #2ecc55; box-shadow: 0 0 0 3px rgba(46, 204, 85, 0.25); }
+.ledger-dot.waiting { background: transparent; border: 2.5px solid #2ecc55; }
+.ledger-dot.dormant { background: #7a7f78; }
+.ledger-bolt { font-size: 0.8rem; line-height: 1; }
+.ledger-card-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ledger-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-meta { color: var(--text-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-when { color: var(--text-muted); font-size: 0.8rem; flex: none; font-variant-numeric: tabular-nums; }
+.ledger-archive {
+  flex: none; background: none; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 1.1rem; line-height: 1; padding: 4px 6px; border-radius: 6px;
+}
+.ledger-archive:hover { color: var(--text); background: rgba(128,128,128,0.15); }
+.ledger-asof { color: var(--text-muted); font-size: 0.75rem; margin-top: 18px; }

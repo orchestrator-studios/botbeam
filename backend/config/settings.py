@@ -9,7 +9,7 @@ load_dotenv(_backend_dir / ".env", override=True)
 
 class Settings(BaseSettings):
     APP_NAME: str = "BotBeam"
-    VERSION: str = "1.4.0"
+    VERSION: str = "1.5.0"
 
     # Database (MySQL — same stack as kh / table-that)
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     AGENT_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 365     # agent/skill token: 1 year
 
     PORT: int = int(os.getenv("PORT", "4888"))
+
+    # Ledger — sessions plane (The Ledger Book, phase 1; woodshed docs/ledger/).
+    # The two windows are the only timing in the system: silence → dormant,
+    # run window → the ⚡ decays. Expiry needs N consecutive sweep misses.
+    LEDGER_SILENCE_WINDOW_MINUTES: int = int(os.getenv("LEDGER_SILENCE_WINDOW_MINUTES", "15"))
+    LEDGER_RUN_WINDOW_SECONDS: int = int(os.getenv("LEDGER_RUN_WINDOW_SECONDS", "120"))
+    LEDGER_EXPIRY_SWEEP_MISSES: int = int(os.getenv("LEDGER_EXPIRY_SWEEP_MISSES", "3"))
+    # Test-only: enables POST /ledger/admin/reset (truncate the caller's ledger rows).
+    LEDGER_ADMIN_RESET: bool = os.getenv("LEDGER_ADMIN_RESET", "false").lower() == "true"
 
     # Logging (mirrors the kh / table-that setup)
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

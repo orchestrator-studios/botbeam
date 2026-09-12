@@ -1,6 +1,6 @@
 import { get, post, patch, put, del, delJson } from './index';
 import { settings } from '../../config/settings';
-import type { Device, User, Memory, MemorySummary, MemoryCategory } from '../../types';
+import type { Device, User, Memory, MemorySummary, MemoryCategory, LedgerBoard, LedgerSession } from '../../types';
 
 // ── request/response wrappers (specific to these endpoints, not domain objects;
 // names mirror backend/routers/auth.py) ──
@@ -63,6 +63,15 @@ export const botbeamApi = {
     post<Device>(`/api/devices/${id}/shares`, { email }),
   unshareDevice: (id: string, email: string): Promise<Device> =>
     delJson<Device>(`/api/devices/${id}/shares?email=${encodeURIComponent(email)}`),
+
+  // ── Ledger sessions (the board's data structure; statuses derived server-side) ──
+  getLedgerBoard: (): Promise<LedgerBoard> => get<LedgerBoard>('/ledger/board'),
+  archiveSession: (id: string): Promise<LedgerSession> =>
+    post<LedgerSession>(`/ledger/sessions/${encodeURIComponent(id)}/archive`),
+  unarchiveSession: (id: string): Promise<LedgerSession> =>
+    post<LedgerSession>(`/ledger/sessions/${encodeURIComponent(id)}/unarchive`),
+  archiveAllDormant: (keep?: string[]): Promise<{ items: LedgerSession[] }> =>
+    post<{ items: LedgerSession[] }>('/ledger/sessions/archive', { all: true, keep }),
 
   proxyUrl: (url: string): string => `${settings.apiUrl}/api/proxy?url=${encodeURIComponent(url)}`,
 };
