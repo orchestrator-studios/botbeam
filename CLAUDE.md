@@ -23,7 +23,7 @@ Virtual display & beam surface for **orchestra**. **FastAPI + async SQLAlchemy (
 One credential: a JWT bearer. The browser keeps it in `localStorage`; the agent (orchestra `botbeam` skill) keeps a long-lived one in `~/.config/orchestra/botbeam.json`. Devices are scoped to the authenticated user. **No secrets in the repo.**
 
 ## Notes
-- `VISION.md` — what BotBeam *is* (the payload-exchange doctrine: send/retrieve, one-place fleet hub, the payload liveness ladder, chatmail). Read it before proposing features.
+- `VISION.md` — what BotBeam *is*: the communication layer between people and their agents (glass made two-way, durable, addressable, agent-aware — never intelligent). Four capabilities (project work to the human world · human-in-the-loop without co-presence · intent inbox · chatmail artifacts) over the payload-exchange mechanism (send/retrieve, one-place fleet hub, liveness ladder). Read it before proposing features.
 - `SPEC.md` — the vision pinned down, use-case-first: five use cases (beam the board · approval gate · capture inbox · chatmail · fleet glance) force the target schema (Agent, Channel, Payload with surface/deep, Grant, Memory) and contracts; gap analysis vs the current build closes it. The three structural gaps at its end are the roadmap, in dependency order.
 - DB is MySQL; tables auto-create on startup (no Alembic yet).
 - Replaced the original Node/Express + MCP `signal` prototype (kept at `github.com/cliff-rosen/signal`). MCP was dropped — orchestra calls the REST API via a bundled Python skill, so there's no MCP server here.
