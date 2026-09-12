@@ -11,7 +11,8 @@ Additive namespace: nothing here touches devices, lockboxes, or memories.
   POST /ledger/admin/reset                test-only truncate (LEDGER_ADMIN_RESET)
 
 Every mutation broadcasts {"event": "ledger_sessions"} to the owner's WS channel
-so the board view refetches. Statuses are derived per request — never stored.
+so the board view refetches. Statuses are derived per request, except
+turn_state (waiting|processing), which is stored by decision (Book rev 17).
 """
 from typing import Optional
 

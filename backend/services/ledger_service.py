@@ -2,16 +2,17 @@
 
 Facts in, statuses out. This service owns both halves of the Book's session
 contract: applying lifecycle signals to stored facts, and deriving status /
-activity / relevance from those facts on every read. Statuses are never stored,
-so there is no state to latch or repair — a wrong picture lasts exactly until
-the next signal.
+relevance from those facts on every read. One exception by decision (Ledger
+Book rev 17): turn_state (waiting|processing) is STORED, declared by the
+prompt/Stop signals rather than inferred — the sweep repairs a crashed
+session's stale 'processing' as an explicit write.
 
 Derivation cascade (the Book's session cheat sheet, first stop wins):
   never prompted → not relevant (hidden) · archived (no event since) → hidden ·
   expired (transcript missing xN sweeps, no event since) → hidden ·
   dormant (ended, or silent past the silence window) → gray ·
-  active: waiting (Stop after prompt) | processing (prompt after Stop),
-  plus run while last_run_at is within the run window.
+  active: activity = turn_state, plus run while last_run_at is within the
+  run window.
 """
 from __future__ import annotations
 
@@ -86,10 +87,11 @@ class LedgerService:
         elif ended or silent:
             status, activity = "dormant", None
         else:
+            # Activity IS the stored turn_state — declared by prompt/Stop
+            # signals, never inferred (Ledger Book rev 17). Run adds the bolt
+            # while the last mutation is inside the run window.
             status = "active"
-            prompted = s.last_prompt_at or datetime.min
-            stopped = s.last_stop_at or datetime.min
-            if prompted > stopped:
+            if s.turn_state == "processing":
                 in_run = s.last_run_at is not None and (now - s.last_run_at) <= run_window
                 activity = "run" if in_run else "processing"
             else:
@@ -106,6 +108,7 @@ class LedgerService:
             "workspace_id": s.workspace_id,
             "machine": s.machine,
             "label": s.label,
+            "turn_state": s.turn_state,
             "first_seen": _iso(s.first_seen),
             "last_event_at": _iso(s.last_event_at),
             "last_prompt_at": _iso(s.last_prompt_at),
@@ -148,11 +151,14 @@ class LedgerService:
         s.sweep_miss_count = 0
 
         if event == "UserPromptSubmit":
+            s.turn_state = "processing"
             s.last_prompt_at = now
             s.ever_prompted = True
         elif event == "Stop":
+            s.turn_state = "waiting"
             s.last_stop_at = now
         elif event == "SessionEnd":
+            s.turn_state = "waiting"
             s.ended_at = now
         elif event == "PostToolUse":
             name = (tool or {}).get("name")
@@ -235,6 +241,12 @@ class LedgerService:
                 if s.transcript_missing_since is None:
                     s.transcript_missing_since = now
                 s.sweep_miss_count += 1
+                applied += 1
+            # Crashed-session cleanup: a dormant row stuck at 'processing'
+            # (killed mid-turn, so no Stop ever arrived) is repaired here —
+            # an explicit write, not an inference at read time.
+            if s.turn_state == "processing" and self.derive(s, now)["status"] == "dormant":
+                s.turn_state = "waiting"
                 applied += 1
         await self.db.commit()
         return applied

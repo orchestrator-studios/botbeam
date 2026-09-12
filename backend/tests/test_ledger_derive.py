@@ -16,6 +16,7 @@ RUN = timedelta(seconds=settings.LEDGER_RUN_WINDOW_SECONDS)
 def s(**kw):
     base = dict(
         id="abc123", user_id=1, first_seen=NOW - timedelta(hours=2),
+        turn_state="waiting",
         last_event_at=NOW - timedelta(seconds=5), last_prompt_at=None,
         last_stop_at=None, last_run_at=None, ended_at=None,
         ever_prompted=True, archived_at=None, transcript_missing_since=None,
@@ -36,22 +37,24 @@ results = [
     # T2: ghost gate — launched, never prompted
     check("never prompted -> not relevant", s(ever_prompted=False),
           "active", "waiting", False),
-    # T3: first prompt -> processing
-    check("prompt after stop -> processing",
-          s(last_prompt_at=NOW - timedelta(seconds=10)),
+    # T3: prompt signal stored turn_state=processing
+    check("turn_state processing -> processing",
+          s(turn_state="processing", last_prompt_at=NOW - timedelta(seconds=10)),
           "active", "processing", True),
     # T4a: tool burst -> run
     check("mutation within run window -> run",
-          s(last_prompt_at=NOW - timedelta(seconds=30), last_run_at=NOW - timedelta(seconds=5)),
+          s(turn_state="processing", last_prompt_at=NOW - timedelta(seconds=30), last_run_at=NOW - timedelta(seconds=5)),
           "active", "run", True),
     # T4b: bolt decays
     check("mutation past run window -> processing",
-          s(last_prompt_at=NOW - timedelta(minutes=5), last_run_at=NOW - RUN - timedelta(seconds=1),
+          s(turn_state="processing", last_prompt_at=NOW - timedelta(minutes=5),
+            last_run_at=NOW - RUN - timedelta(seconds=1),
             last_event_at=NOW - timedelta(minutes=1)),
           "active", "processing", True),
-    # T4c: turn ends -> waiting
-    check("stop after prompt -> waiting",
-          s(last_prompt_at=NOW - timedelta(minutes=2), last_stop_at=NOW - timedelta(minutes=1)),
+    # T4c: Stop stored turn_state=waiting — run bolt does NOT show while waiting
+    check("turn_state waiting -> waiting even with recent mutation",
+          s(turn_state="waiting", last_prompt_at=NOW - timedelta(minutes=2),
+            last_stop_at=NOW - timedelta(minutes=1), last_run_at=NOW - timedelta(seconds=5)),
           "active", "waiting", True),
     # T5a: clean exit -> dormant immediately
     check("SessionEnd -> dormant immediately",
@@ -70,9 +73,13 @@ results = [
           "archived", None, False),
     # T8: event after archived_at -> back (derived un-archive)
     check("event after archive -> derived un-archive",
-          s(archived_at=NOW - timedelta(minutes=5), last_event_at=NOW - timedelta(seconds=2),
-            last_prompt_at=NOW - timedelta(seconds=2)),
+          s(turn_state="processing", archived_at=NOW - timedelta(minutes=5),
+            last_event_at=NOW - timedelta(seconds=2), last_prompt_at=NOW - timedelta(seconds=2)),
           "active", "processing", True),
+    # crash cleanup precondition: dormant hides turn_state regardless
+    check("dormant with stale processing -> activity None",
+          s(turn_state="processing", last_event_at=NOW - SIL - timedelta(minutes=1)),
+          "dormant", None, True),
     # T9: expired
     check("missing x3 sweeps, no event since -> expired",
           s(sweep_miss_count=3, transcript_missing_since=NOW - timedelta(minutes=20),

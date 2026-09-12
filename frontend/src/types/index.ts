@@ -84,6 +84,8 @@ export interface LedgerSession {
   workspace_id: string | null;
   machine: string | null;
   label: string | null;
+  turn_state: 'waiting' | 'processing';  // stored — set by prompt/Stop signals
+
   first_seen: string | null;
   last_event_at: string | null;
   last_prompt_at: string | null;
