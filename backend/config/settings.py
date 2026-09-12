@@ -27,9 +27,9 @@ class Settings(BaseSettings):
     PORT: int = int(os.getenv("PORT", "4888"))
 
     # Ledger — sessions plane (The Ledger Book, phase 1; woodshed docs/ledger/).
-    # The two windows are the only timing in the system: silence → dormant,
-    # run window → the ⚡ decays. Expiry needs N consecutive sweep misses.
-    LEDGER_SILENCE_WINDOW_MINUTES: int = int(os.getenv("LEDGER_SILENCE_WINDOW_MINUTES", "15"))
+    # One display window (the ⚡ decays past it) — lifecycle status is stored,
+    # not timed (rev 18; the silence-TTL rule is gone). Expiry needs N
+    # consecutive sweep misses.
     LEDGER_RUN_WINDOW_SECONDS: int = int(os.getenv("LEDGER_RUN_WINDOW_SECONDS", "120"))
     LEDGER_EXPIRY_SWEEP_MISSES: int = int(os.getenv("LEDGER_EXPIRY_SWEEP_MISSES", "3"))
     # Test-only: enables POST /ledger/admin/reset (truncate the caller's ledger rows).

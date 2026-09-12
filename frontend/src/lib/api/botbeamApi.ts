@@ -64,7 +64,7 @@ export const botbeamApi = {
   unshareDevice: (id: string, email: string): Promise<Device> =>
     delJson<Device>(`/api/devices/${id}/shares?email=${encodeURIComponent(email)}`),
 
-  // ── Ledger sessions (the board's data structure; statuses derived server-side) ──
+  // ── Ledger sessions (the board's data structure; statuses stored server-side) ──
   getLedgerBoard: (): Promise<LedgerBoard> => get<LedgerBoard>('/ledger/board'),
   archiveSession: (id: string): Promise<LedgerSession> =>
     post<LedgerSession>(`/ledger/sessions/${encodeURIComponent(id)}/archive`),

@@ -5,9 +5,12 @@ import type { LedgerBoard, LedgerSession } from '../types';
 
 // The board obeys the Ledger Book's session cheat sheet (woodshed docs/ledger/):
 // Rule 1 — it lists every session ever prompted, minus archived, minus expired;
-// Rule 2 — the glyph: solid green = processing, +⚡ = run, ring = waiting,
-// gray = dormant (exited, crashed, or idle — unknowable and equivalent).
-// Statuses arrive derived from the service; this view computes nothing.
+// Rule 2 — the glyph: solid green = processing, +⚡ = run, ring = waiting.
+// Layout (rev 18): Active sessions are CARDS in a grid, in the server's stable
+// order (first_seen asc — a card never moves while its session stays active;
+// only glyphs update). Inactive (dormant) sessions list below, newest first.
+// Statuses arrive stored/computed from the service; this view computes nothing
+// and never re-sorts.
 
 function relTime(iso: string | null): string {
   if (!iso) return '';
@@ -19,7 +22,6 @@ function relTime(iso: string | null): string {
 }
 
 function Glyph({ s }: { s: LedgerSession }) {
-  if (s.status === 'dormant') return <span className="ledger-dot dormant" title="Dormant — silent; resumable" />;
   if (s.activity === 'waiting') return <span className="ledger-dot waiting" title="Waiting — your move" />;
   return (
     <span className="ledger-glyph" title={s.activity === 'run' ? 'Run — mutating right now' : 'Processing — Claude is working'}>
@@ -69,7 +71,10 @@ export default function SessionsView() {
   }
 
   const sessions = board?.sessions ?? [];
-  const dormantCount = sessions.filter((s) => s.status === 'dormant').length;
+  // The server guarantees the order (active by first_seen asc, then inactive
+  // by recency) — filter preserves it, so no client-side sorting.
+  const active = sessions.filter((s) => s.status === 'active');
+  const inactive = sessions.filter((s) => s.status !== 'active');
 
   return (
     <div className="main ledger-view">
@@ -78,12 +83,12 @@ export default function SessionsView() {
           <h1>Sessions</h1>
           <p>
             Every session you ever prompted, minus the ones you archived, minus the ones whose
-            transcript is gone. Green is working, a ring is waiting on you, gray is silent — archive
-            what you're done with.
+            transcript is gone. Active sessions hold their card — green is working, a ring is
+            waiting on you. Exited sessions drop to the inactive list; archive what you're done with.
           </p>
-          {dormantCount > 0 && (
+          {inactive.length > 0 && (
             <button className="btn btn-ghost ledger-clear" onClick={() => setConfirmClear(true)}>
-              Archive all dormant ({dormantCount})
+              Archive all inactive ({inactive.length})
             </button>
           )}
         </div>
@@ -95,26 +100,53 @@ export default function SessionsView() {
         ) : sessions.length === 0 ? (
           <p className="ledger-empty">No sessions on the board — prompt a Claude Code session and it appears here.</p>
         ) : (
-          <ul className="ledger-list">
-            {sessions.map((s) => (
-              <li key={s.id} className={`ledger-card ${s.status}`}>
-                <Glyph s={s} />
-                <div className="ledger-card-main">
-                  <span className="ledger-label">{s.label || s.id.slice(0, 8)}</span>
-                  <span className="ledger-meta">
-                    {s.workspace_id || ''}{s.machine ? ` · ${s.machine}` : ''}
-                  </span>
-                </div>
-                <span className="ledger-when" title={s.last_event_at || ''}>{relTime(s.last_event_at)}</span>
-                {s.status === 'dormant' && (
-                  <button className="ledger-archive" title="Archive — remove from the board (any activity brings it back)"
-                    onClick={() => archive(s.id)}>
-                    &times;
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            <section className="ledger-section">
+              <h2>Active</h2>
+              {active.length === 0 ? (
+                <p className="ledger-empty">No active sessions.</p>
+              ) : (
+                <ul className="ledger-grid">
+                  {active.map((s) => (
+                    <li key={s.id} className="ledger-tile">
+                      <div className="ledger-tile-top">
+                        <Glyph s={s} />
+                        <span className="ledger-when" title={s.last_event_at || ''}>{relTime(s.last_event_at)}</span>
+                      </div>
+                      <span className="ledger-label">{s.label || s.id.slice(0, 8)}</span>
+                      <span className="ledger-meta">
+                        {s.workspace_id || ''}{s.machine ? ` · ${s.machine}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {inactive.length > 0 && (
+              <section className="ledger-section">
+                <h2>Inactive</h2>
+                <ul className="ledger-list">
+                  {inactive.map((s) => (
+                    <li key={s.id} className={`ledger-card ${s.status}`}>
+                      <span className="ledger-dot dormant" title="Dormant — exited; resumable" />
+                      <div className="ledger-card-main">
+                        <span className="ledger-label">{s.label || s.id.slice(0, 8)}</span>
+                        <span className="ledger-meta">
+                          {s.workspace_id || ''}{s.machine ? ` · ${s.machine}` : ''}
+                        </span>
+                      </div>
+                      <span className="ledger-when" title={s.last_event_at || ''}>{relTime(s.last_event_at)}</span>
+                      <button className="ledger-archive" title="Archive — remove from the board (any activity brings it back)"
+                        onClick={() => archive(s.id)}>
+                        &times;
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
         )}
 
         {board && (
@@ -128,9 +160,9 @@ export default function SessionsView() {
       {confirmClear && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setConfirmClear(false); }}>
           <div className="modal">
-            <h2>Archive all dormant sessions?</h2>
+            <h2>Archive all inactive sessions?</h2>
             <p style={{ color: 'var(--text-muted)', margin: '0 0 20px' }}>
-              Clears every gray card off the board. Nothing is deleted — any session that does
+              Clears the inactive list off the board. Nothing is deleted — any session that does
               something comes right back.
             </p>
             <div className="actions">

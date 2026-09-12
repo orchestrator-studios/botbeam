@@ -2295,14 +2295,30 @@ table.content-table {
 
 /* ── Sessions view (the ledger board — sessions plane, phase 1) ──
    Glyphs follow the Ledger Book's cheat sheet: solid green = processing,
-   +bolt = run, hollow ring = waiting, gray = dormant. */
+   +bolt = run, hollow ring = waiting, gray = dormant. Layout (rev 18):
+   Active sessions are tiles in a stable grid; inactive rows list below. */
 .ledger-view { overflow-y: auto; }
 .ledger-content { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
 .ledger-head h1 { font-size: 1.6rem; margin-bottom: 6px; }
 .ledger-head p { color: var(--text-muted); margin-bottom: 12px; max-width: 68ch; }
 .ledger-clear { margin-bottom: 16px; }
 .ledger-empty { color: var(--text-muted); padding: 24px 0; }
-.ledger-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ledger-section { margin-top: 20px; }
+.ledger-section h2 {
+  font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-muted); margin: 0 0 10px;
+}
+.ledger-grid {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px;
+}
+.ledger-tile {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  padding: 12px 14px; border: 1px solid var(--border, rgba(128,128,128,0.25));
+  border-radius: 10px; background: var(--surface, rgba(128,128,128,0.06));
+}
+.ledger-tile-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.ledger-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .ledger-card {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 14px; border: 1px solid var(--border, rgba(128,128,128,0.25));

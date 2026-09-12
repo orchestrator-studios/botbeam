@@ -6,13 +6,15 @@ Additive namespace: nothing here touches devices, lockboxes, or memories.
   POST /ledger/sessions/{sid}/unarchive   restore one
   POST /ledger/sessions/archive           batch: by prefixes, or all dormant with a keep-list
   POST /ledger/sessions/sweep-report      one machine's transcript-presence observations
-  GET  /ledger/sessions                   list with derived status/activity/relevance
+  GET  /ledger/sessions                   list; ?status= filters the stored column
   GET  /ledger/board                      the data structure the board view renders
   POST /ledger/admin/reset                test-only truncate (LEDGER_ADMIN_RESET)
 
 Every mutation broadcasts {"event": "ledger_sessions"} to the owner's WS channel
-so the board view refetches. Statuses are derived per request, except
-turn_state (waiting|processing), which is stored by decision (Book rev 17).
+so the board view refetches. Both statuses are STORED by decision — turn_state
+(waiting|processing, Book rev 17) and the lifecycle status (active|dormant|
+archived|expired, Book rev 18); ?status= filters on the stored column. Only
+display fields (activity, relevant) are computed per read.
 """
 from typing import Optional
 

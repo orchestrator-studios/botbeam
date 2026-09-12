@@ -109,13 +109,13 @@ class DeviceShare(Base):
 class LedgerSession(Base):
     """One Claude Code session's stored facts — the ledger's telemetry plane.
 
-    Facts plus one declared status, per The Ledger Book (woodshed docs/ledger/):
-    turn_state (waiting|processing) is STORED, set explicitly by signals (rev 17);
-    everything else — active / dormant / archived / expired, run, relevant — the
-    ledger service derives from these columns on every read, so a wrong picture
-    lasts exactly until the next signal. Scoped to the owner like
-    every other row; written only by LedgerService from hook signals, archive
-    calls, and sweep reports.
+    Statuses are STORED, per The Ledger Book (woodshed docs/ledger/): turn_state
+    (waiting|processing) is set explicitly by signals (rev 17), and the lifecycle
+    status (active|dormant|archived|expired) is written by its one writer per
+    transition (rev 18) — hooks, archive calls, and the sweep. Nothing lifecycle
+    is derived at read time; only display windows (the run bolt) and filters
+    (relevant) are computed. Scoped to the owner like every other row; written
+    only by LedgerService from hook signals, archive calls, and sweep reports.
     """
     __tablename__ = "ledger_sessions"
     __table_args__ = _UTF8MB4
@@ -130,13 +130,20 @@ class LedgerSession(Base):
     # 'processing', Stop/SessionEnd set 'waiting'. Declared by signals, never
     # inferred; the sweep repairs a crashed session's stale 'processing'.
     turn_state = Column(String(16), default="waiting", nullable=False)          # 'waiting' | 'processing'
+    # STORED lifecycle status (Ledger Book rev 18): every signal except
+    # SessionEnd writes 'active' (un-archiving / un-expiring explicitly);
+    # SessionEnd writes 'dormant'; archive/unarchive write 'archived'/'dormant';
+    # the sweep writes 'expired' at N consecutive transcript misses. A crashed
+    # session keeps 'active' — accepted known gap (rev 18) until a sweep-repair
+    # mechanism lands; do not infer around it.
+    status = Column(String(16), default="active", nullable=False)    # active|dormant|archived|expired
     last_event_at = Column(DateTime, default=datetime.utcnow, nullable=False)   # heartbeat: every signal
     last_prompt_at = Column(DateTime, nullable=True)         # UserPromptSubmit
     last_stop_at = Column(DateTime, nullable=True)           # Stop (informational; turn_state carries the status)
     last_run_at = Column(DateTime, nullable=True)            # PostToolUse with a mutating tool — the ⚡
-    ended_at = Column(DateTime, nullable=True)               # SessionEnd; an event after it derives a reopen
+    ended_at = Column(DateTime, nullable=True)               # SessionEnd (informational; status carries the lifecycle)
     ever_prompted = Column(Boolean, default=False, nullable=False)  # relevance gate — filters picker ghosts
-    archived_at = Column(DateTime, nullable=True)            # user dismissal; an event after it derives un-archive
+    archived_at = Column(DateTime, nullable=True)            # when the user dismissed it; cleared when a signal re-activates
     transcript_missing_since = Column(DateTime, nullable=True)      # first consecutive sweep miss
     sweep_miss_count = Column(Integer, default=0, nullable=False)   # consecutive misses; expiry at N
 

@@ -75,7 +75,8 @@ export interface MemorySummary {
 
 // ── Ledger sessions (the telemetry plane — The Ledger Book, phase 1) ──
 // The wire representation from /ledger: stored facts (snake_case, matching the
-// service) plus the derived fields, which are computed per read and never stored.
+// service) plus the computed display fields (activity, relevant). Both statuses
+// are STORED — turn_state (rev 17) and the lifecycle status (rev 18).
 export type LedgerStatus = 'active' | 'dormant' | 'archived' | 'expired';
 export type LedgerActivity = 'waiting' | 'processing' | 'run' | null;
 
@@ -95,9 +96,9 @@ export interface LedgerSession {
   ever_prompted: boolean;
   archived_at: string | null;
   transcript_missing_since: string | null;
-  status: LedgerStatus;       // derived
-  activity: LedgerActivity;   // derived — active sessions only
-  relevant: boolean;          // derived
+  status: LedgerStatus;       // stored — one writer per transition (rev 18)
+  activity: LedgerActivity;   // computed — active sessions' glyph only
+  relevant: boolean;          // computed — the board filter
 }
 
 // GET /ledger/board — the data structure the board view renders.

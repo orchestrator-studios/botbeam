@@ -1,18 +1,24 @@
 """Ledger sessions — the telemetry plane (The Ledger Book, phase 1).
 
-Facts in, statuses out. This service owns both halves of the Book's session
-contract: applying lifecycle signals to stored facts, and deriving status /
-relevance from those facts on every read. One exception by decision (Ledger
-Book rev 17): turn_state (waiting|processing) is STORED, declared by the
-prompt/Stop signals rather than inferred — the sweep repairs a crashed
-session's stale 'processing' as an explicit write.
+Facts and statuses in, statuses out. Both session statuses are STORED, written
+by exactly one writer per transition (Ledger Book rev 17 + 18) — nothing
+lifecycle is derived at read time:
 
-Derivation cascade (the Book's session cheat sheet, first stop wins):
-  never prompted → not relevant (hidden) · archived (no event since) → hidden ·
-  expired (transcript missing xN sweeps, no event since) → hidden ·
-  dormant (ended, or silent past the silence window) → gray ·
-  active: activity = turn_state, plus run while last_run_at is within the
-  run window.
+  turn_state (waiting|processing) — UserPromptSubmit → processing, Stop /
+  SessionEnd → waiting (rev 17). The sweep repairs a stale 'processing' on a
+  non-active row as an explicit write.
+
+  status (active|dormant|archived|expired) — every hook signal except
+  SessionEnd → active (this is what un-archives and un-expires); SessionEnd →
+  dormant; POST /archive → archived (409 while active); POST /unarchive →
+  dormant; the sweep → expired at N consecutive transcript misses (rev 18).
+  A crashed session keeps status='active' — an accepted known gap until a
+  sweep-repair mechanism lands; deliberately no inference papers over it.
+
+What remains computed per read are display windows and filters only:
+  activity — the glyph for active sessions: turn_state, upgraded to 'run'
+  while the last mutation is inside the run window.
+  relevant — ever_prompted and not archived/expired (the board filter).
 """
 from __future__ import annotations
 
@@ -59,50 +65,23 @@ class LedgerService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    # ── derivation ────────────────────────────────────────────────────────────
+    # ── computed display fields (windows/filters only — never lifecycle) ─────
 
     @staticmethod
-    def derive(s: LedgerSession, now: Optional[datetime] = None) -> dict:
-        """Pure facts → {status, activity, relevant}. Never touches the DB."""
-        now = now or datetime.utcnow()
-        silence = timedelta(minutes=settings.LEDGER_SILENCE_WINDOW_MINUTES)
-        run_window = timedelta(seconds=settings.LEDGER_RUN_WINDOW_SECONDS)
-
-        # "No event since X" is expressed as last_event_at <= X: every signal
-        # (including the one that sets X) bumps last_event_at, so a strictly
-        # later heartbeat means life after X.
-        archived = s.archived_at is not None and s.last_event_at <= s.archived_at
-        expired = (
-            s.sweep_miss_count >= settings.LEDGER_EXPIRY_SWEEP_MISSES
-            and s.transcript_missing_since is not None
-            and s.last_event_at <= s.transcript_missing_since
-        )
-        ended = s.ended_at is not None and s.last_event_at <= s.ended_at
-        silent = (now - s.last_event_at) > silence
-
-        if archived:
-            status, activity = "archived", None
-        elif expired:
-            status, activity = "expired", None
-        elif ended or silent:
-            status, activity = "dormant", None
-        else:
-            # Activity IS the stored turn_state — declared by prompt/Stop
-            # signals, never inferred (Ledger Book rev 17). Run adds the bolt
-            # while the last mutation is inside the run window.
-            status = "active"
-            if s.turn_state == "processing":
-                in_run = s.last_run_at is not None and (now - s.last_run_at) <= run_window
-                activity = "run" if in_run else "processing"
-            else:
-                activity = "waiting"
-
-        relevant = bool(s.ever_prompted) and status not in ("archived", "expired")
-        return {"status": status, "activity": activity, "relevant": relevant}
+    def activity(s: LedgerSession, now: Optional[datetime] = None) -> Optional[str]:
+        """Active sessions' glyph: stored turn_state, plus the run bolt while
+        the last mutation is inside the run window. None off the active band."""
+        if s.status != "active":
+            return None
+        if s.turn_state == "processing":
+            now = now or datetime.utcnow()
+            run_window = timedelta(seconds=settings.LEDGER_RUN_WINDOW_SECONDS)
+            in_run = s.last_run_at is not None and (now - s.last_run_at) <= run_window
+            return "run" if in_run else "processing"
+        return "waiting"
 
     def _repr(self, s: LedgerSession, now: Optional[datetime] = None) -> dict:
-        """The Session wire representation: stored facts + derived fields."""
-        d = self.derive(s, now)
+        """The Session wire representation: stored facts + computed display fields."""
         return {
             "id": s.id,
             "workspace_id": s.workspace_id,
@@ -118,7 +97,9 @@ class LedgerService:
             "ever_prompted": bool(s.ever_prompted),
             "archived_at": _iso(s.archived_at),
             "transcript_missing_since": _iso(s.transcript_missing_since),
-            **d,
+            "status": s.status,
+            "activity": self.activity(s, now),
+            "relevant": bool(s.ever_prompted) and s.status not in ("archived", "expired"),
         }
 
     # ── signals ──────────────────────────────────────────────────────────────
@@ -145,10 +126,18 @@ class LedgerService:
         if machine:
             s.machine = machine
 
-        # Any signal is a sign of life: heartbeat + expiry facts self-correct.
+        # Universal writes: heartbeat, expiry-fact resets, and the status.
+        # Every signal but SessionEnd declares the session active — this is the
+        # explicit un-archive / un-expire (rev 18), not a derivation.
         s.last_event_at = now
         s.transcript_missing_since = None
         s.sweep_miss_count = 0
+        if event == "SessionEnd":
+            s.status = "dormant"
+        else:
+            if s.status == "archived":
+                s.archived_at = None
+            s.status = "active"
 
         if event == "UserPromptSubmit":
             s.turn_state = "processing"
@@ -174,8 +163,9 @@ class LedgerService:
 
     async def archive(self, user_id: int, sid: str) -> dict:
         s = await self._own(user_id, sid)
-        if self.derive(s)["status"] == "active":
+        if s.status == "active":
             raise SessionActive("session is active")
+        s.status = "archived"
         s.archived_at = datetime.utcnow()
         await self.db.commit()
         await self.db.refresh(s)
@@ -184,6 +174,7 @@ class LedgerService:
 
     async def unarchive(self, user_id: int, sid: str) -> dict:
         s = await self._own(user_id, sid)
+        s.status = "dormant"
         s.archived_at = None
         await self.db.commit()
         await self.db.refresh(s)
@@ -198,6 +189,7 @@ class LedgerService:
 
         Active sessions are silently skipped in batch form — the point is
         clearing the board, and the board's active cards are never clutter.
+        Already-archived rows are skipped too (idempotent by inspection).
         """
         rows = (await self.db.execute(
             select(LedgerSession).where(LedgerSession.user_id == user_id)
@@ -210,9 +202,9 @@ class LedgerService:
                 continue
             if not all_ and not any(s.id.startswith(p) for p in (prefixes or [])):
                 continue
-            d = self.derive(s, now)
-            if d["status"] == "active" or s.archived_at is not None and not d["relevant"]:
+            if s.status in ("active", "archived"):
                 continue
+            s.status = "archived"
             s.archived_at = now
             out.append(s)
         await self.db.commit()
@@ -241,11 +233,16 @@ class LedgerService:
                 if s.transcript_missing_since is None:
                     s.transcript_missing_since = now
                 s.sweep_miss_count += 1
+                # The sweep is the one writer of 'expired' (rev 18). "No event
+                # since" is structural: any signal zeroes the miss count, so
+                # reaching the threshold means the session never spoke again.
+                if s.sweep_miss_count >= settings.LEDGER_EXPIRY_SWEEP_MISSES:
+                    s.status = "expired"
                 applied += 1
-            # Crashed-session cleanup: a dormant row stuck at 'processing'
-            # (killed mid-turn, so no Stop ever arrived) is repaired here —
+            # Stale-turn_state cleanup: a non-active row stuck at 'processing'
+            # (e.g. backfilled from a crash by migration 003) is repaired here —
             # an explicit write, not an inference at read time.
-            if s.turn_state == "processing" and self.derive(s, now)["status"] == "dormant":
+            if s.turn_state == "processing" and s.status != "active":
                 s.turn_state = "waiting"
                 applied += 1
         await self.db.commit()
@@ -261,11 +258,11 @@ class LedgerService:
         q = select(LedgerSession).where(LedgerSession.user_id == user_id)
         if machine:
             q = q.where(LedgerSession.machine == machine)
+        if status:
+            q = q.where(LedgerSession.status == status)
         rows = (await self.db.execute(q)).scalars().all()
         now = datetime.utcnow()
         out = [self._repr(s, now) for s in rows]
-        if status:
-            out = [r for r in out if r["status"] == status]
         if relevant is not None:
             out = [r for r in out if r["relevant"] == relevant]
         out.sort(key=lambda r: r["last_event_at"] or "", reverse=True)
@@ -274,18 +271,18 @@ class LedgerService:
     async def board(self, user_id: int) -> dict:
         """The data structure the BotBeam board view is built from.
 
-        Sessions: relevant only, active first (run/processing, then waiting),
-        then dormant by recency. Events and products ship empty in phase 1 —
-        the record plane lands in phase 2.
+        Sessions: relevant only. Ordering guarantee (rev 18): active sessions
+        first in STABLE order — first_seen ascending, so a card never moves
+        while its session stays active and new activations append at the end —
+        then inactive by last_event_at descending. Events and products ship
+        empty in phase 1 — the record plane lands in phase 2.
         """
         now = datetime.utcnow()
-        sessions = await self.list(user_id, relevant=True)
-        # Stable two-pass sort: recency within each band, bands ordered
-        # run/processing → waiting → dormant.
-        rank = {"run": 0, "processing": 0, "waiting": 1}
-        sessions.sort(key=lambda r: r["last_event_at"] or "", reverse=True)
-        sessions.sort(key=lambda r: (0 if r["status"] == "active" else 1, rank.get(r["activity"], 2)))
-        return {"sessions": sessions, "events": [], "products": [], "as_of": _iso(now)}
+        sessions = await self.list(user_id, relevant=True)   # last_event_at desc
+        active = [r for r in sessions if r["status"] == "active"]
+        active.sort(key=lambda r: r["first_seen"] or "")
+        inactive = [r for r in sessions if r["status"] != "active"]
+        return {"sessions": active + inactive, "events": [], "products": [], "as_of": _iso(now)}
 
     # ── test support ─────────────────────────────────────────────────────────
 
