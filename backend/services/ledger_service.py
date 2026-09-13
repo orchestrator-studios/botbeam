@@ -183,10 +183,12 @@ class LedgerService:
         elif s.user_id != user_id:
             raise LedgerError("Session belongs to another user")
 
-        # Identity fields settle on first sight and refresh harmlessly after.
+        # Workspace refreshes; the label is first-write-wins. A card must not
+        # rename itself mid-life when the shell cd's into a subdirectory.
         if cwd:
             s.workspace_id = cwd
-            s.label = _label(cwd, sid)
+            if not s.label:
+                s.label = _label(cwd, sid)
         if machine:
             s.machine = machine
 

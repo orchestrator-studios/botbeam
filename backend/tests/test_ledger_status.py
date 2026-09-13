@@ -141,6 +141,19 @@ async def main():
         check("board: prompt/stop churn does not move active cards",
               actives == ["sess-a", "sess-b", "sess-d"], actives)
 
+        # ── label is first-write-wins; workspace keeps refreshing ────────────
+        # A card must not rename itself mid-life when the shell cd's deeper.
+        # (Last, so the new session does not perturb the board assertions.)
+        await svc.apply_event(U, "sess-g", "SessionStart", cwd="/w/gamma", machine="m1")
+        first_label = (await db.get(LedgerSession, "sess-g")).label
+        await svc.apply_event(U, "sess-g", "UserPromptSubmit", cwd="/w/gamma/skills/ledger")
+        s = await db.get(LedgerSession, "sess-g")
+        check("label settles on first sight, survives a cd into a subdirectory",
+              first_label == "gamma·sess-g" and s.label == first_label,
+              (first_label, s.label))
+        check("workspace_id still refreshes to the current cwd",
+              s.workspace_id == "/w/gamma/skills/ledger", s.workspace_id)
+
     await engine.dispose()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return all(RESULTS)
