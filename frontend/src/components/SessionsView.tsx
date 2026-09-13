@@ -17,12 +17,14 @@ import type { LedgerBoard, LedgerSession } from '../types';
 // on every event's and deliverable's stream pill, and as a dot on attributed
 // session cards. Identity is never color-alone — the stream title always
 // rides with the swatch. Events and deliverables carry their session as a
-// chip (emitter / the one mid-run). meta EVENTS render stream-less
-// (bookkeeping, not a thread); meta DELIVERABLES name their home as a plain
-// muted label — no pill, because meta has no stream card or feed presence
-// to link to, and a clickable pill must never point at a place that isn't
-// on the board. Statuses arrive stored/computed from the service; this view
-// computes nothing and never re-sorts.
+// chip (emitter / the one mid-run). No slug is special-cased anywhere in this
+// view: every stream gets a card, every event and deliverable gets a clickable
+// pill. The `meta` carve-out that used to live here hid one stream from the
+// Streams panel while still labelling deliverables with its title, so the board
+// named a place it refused to show — a clickable pill must never point at
+// something that isn't on the board, and the fix is to show it, not to mute the
+// label. Statuses arrive stored/computed from the service; this view computes
+// nothing and never re-sorts.
 
 // Categorical palette (dataviz reference, dark column) — validated against
 // this app's surface: 8/8 pass lightness band, chroma floor, CVD separation,
@@ -167,9 +169,10 @@ export default function SessionsView() {
   // by recency) — filter preserves it, so no client-side sorting.
   const active = sessions.filter((s) => s.status === 'active');
   const inactive = sessions.filter((s) => s.status !== 'active');
-  // meta stays in the payload (it labels event pills) but isn't a working
-  // stream, so it doesn't get a card.
-  const streams = (board?.streams ?? []).filter((s) => s.id !== 'meta');
+  // Every stream the server sends gets a card. No slug is special-cased here:
+  // a stream the board references but refuses to show is a label pointing at a
+  // place that doesn't exist, which is what the meta carve-out produced.
+  const streams = board?.streams ?? [];
 
   const streamTitle = useMemo(() => {
     const m: Record<string, string> = {};
@@ -349,11 +352,8 @@ export default function SessionsView() {
                     return (
                       <li key={d.id}
                         className={`ledger-deliverable-card${hover.stream === d.stream_id ? ' hl' : ''}${streamFilter === d.stream_id ? ' selected' : ''}`}
-                        style={d.stream_id !== 'meta' ? { borderLeftColor: streamColor(d.stream_id) } : undefined}
-                        onMouseEnter={() => setHover({
-                          stream: d.stream_id !== 'meta' ? d.stream_id : null,
-                          session: worker?.id,
-                        })}
+                        style={{ borderLeftColor: streamColor(d.stream_id) }}
+                        onMouseEnter={() => setHover({ stream: d.stream_id, session: worker?.id })}
                         onMouseLeave={() => setHover({})}>
                         <div className="ledger-stream-top">
                           <span className="ledger-label">{d.name}</span>
@@ -361,16 +361,9 @@ export default function SessionsView() {
                         </div>
                         {d.state && <span className="ledger-stream-state">{d.state}</span>}
                         <div className="ledger-deliverable-links">
-                          {d.stream_id === 'meta' ? (
-                            <span className="ledger-meta-tag"
-                              title="Home: the ledger system itself — bookkeeping, not a board stream">
-                              {streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
-                            </span>
-                          ) : (
-                            <StreamTag slug={d.stream_id}
-                              title={streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
-                              onClick={() => setStreamFilter((f) => (f === d.stream_id ? null : d.stream_id))} />
-                          )}
+                          <StreamTag slug={d.stream_id}
+                            title={streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
+                            onClick={() => setStreamFilter((f) => (f === d.stream_id ? null : d.stream_id))} />
                           {worker?.open_run && (
                             <span className="ledger-run-line"
                               title={`${worker.label || worker.id} is working this now`}>
@@ -407,18 +400,13 @@ export default function SessionsView() {
               <ul className="ledger-feed">
                 {events.map((e) => (
                   <li key={e.id}
-                    className={`ledger-feed-line${e.stream_id === 'meta' ? ' meta' : ''}`}
+                    className="ledger-feed-line"
                     title={(e.body || []).join('\n')}
-                    onMouseEnter={() => setHover({
-                      stream: e.stream_id !== 'meta' ? e.stream_id : null,
-                      session: e.session_id,
-                    })}
+                    onMouseEnter={() => setHover({ stream: e.stream_id, session: e.session_id })}
                     onMouseLeave={() => setHover({})}>
-                    {e.stream_id !== 'meta' && (
-                      <StreamTag slug={e.stream_id}
-                        title={streamTitle[e.stream_id] ?? prettySlug(e.stream_id)}
-                        onClick={() => setStreamFilter((f) => (f === e.stream_id ? null : e.stream_id))} />
-                    )}
+                    <StreamTag slug={e.stream_id}
+                      title={streamTitle[e.stream_id] ?? prettySlug(e.stream_id)}
+                      onClick={() => setStreamFilter((f) => (f === e.stream_id ? null : e.stream_id))} />
                     <span className="ledger-feed-headline">{e.headline}</span>
                     <SessionChip s={e.session_id ? sessionById[e.session_id] : undefined} sid={e.session_id} />
                     <span className="ledger-when" title={e.at}>{relTime(e.at)}</span>
