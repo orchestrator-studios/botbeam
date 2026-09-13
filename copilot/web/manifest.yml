@@ -29,6 +29,9 @@ variables:
   DB_HOST: chatter.c0guz2wkpcod.us-east-2.rds.amazonaws.com
   DB_USER: admin
   DB_NAME: botbeam
+  # Enables POST /ledger/admin/reset for the ledger test round (Cliff,
+  # 2026-09-13). Remove after the T-round — it truncates the caller's rows.
+  LEDGER_ADMIN_RESET: true
 
 secrets:
   DB_PASSWORD: /copilot/botbeam/prod/secrets/db_password
