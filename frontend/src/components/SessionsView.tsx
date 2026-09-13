@@ -17,14 +17,11 @@ import type { LedgerBoard, LedgerSession } from '../types';
 // on every event's and deliverable's stream pill, and as a dot on attributed
 // session cards. Identity is never color-alone — the stream title always
 // rides with the swatch. Events and deliverables carry their session as a
-// chip (emitter / the one mid-run). No slug is special-cased anywhere in this
-// view: every stream gets a card, every event and deliverable gets a clickable
-// pill. The `meta` carve-out that used to live here hid one stream from the
-// Streams panel while still labelling deliverables with its title, so the board
-// named a place it refused to show — a clickable pill must never point at
-// something that isn't on the board, and the fix is to show it, not to mute the
-// label. Statuses arrive stored/computed from the service; this view computes
-// nothing and never re-sorts.
+// chip (emitter / the one mid-run). No slug is special-cased: every stream gets
+// a card, every event and deliverable gets a clickable pill. A pill must never
+// point at a stream the board withholds, so nothing here is filtered by name.
+// Statuses arrive stored/computed from the service; this view computes nothing
+// and never re-sorts.
 
 // Categorical palette (dataviz reference, dark column) — validated against
 // this app's surface: 8/8 pass lightness band, chroma floor, CVD separation,
