@@ -16,16 +16,17 @@
 -- is gone; new code fails until actor exists. Running sessions' skill
 -- copies that still post session_id 422 until restarted — accepted.
 --
--- NOTE: the DROP FOREIGN KEY name is the create_all default. Verify before
--- running:  SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
---           WHERE TABLE_NAME='ledger_events' AND REFERENCED_TABLE_NAME='ledger_sessions';
+-- NOTE: the DROP FOREIGN KEY name was verified against prod on 2026-09-13:
+--   SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+--   WHERE TABLE_NAME='ledger_events' AND REFERENCED_TABLE_NAME='ledger_sessions';
+--   -> ledger_events_ibfk_2
 
 ALTER TABLE ledger_events
   ADD COLUMN actor VARCHAR(64) NOT NULL DEFAULT '' AFTER body;
 
 UPDATE ledger_events SET actor = CONCAT('session:', session_id);
 
-ALTER TABLE ledger_events DROP FOREIGN KEY ledger_events_ibfk_1;
+ALTER TABLE ledger_events DROP FOREIGN KEY ledger_events_ibfk_2;
 
 ALTER TABLE ledger_events
   DROP COLUMN session_id,
