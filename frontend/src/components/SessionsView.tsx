@@ -6,11 +6,12 @@ import type { LedgerBoard, LedgerSession } from '../types';
 // The board obeys the Ledger Book's session cheat sheet (woodshed docs/ledger/):
 // Rule 1 — it lists every session ever prompted, minus archived, minus expired;
 // Rule 2 — the glyph: solid green = processing, +⚡ = run, ring = waiting.
-// Layout (rev 18): Active sessions are CARDS in a grid, in the server's stable
-// order (first_seen asc — a card never moves while its session stays active;
-// only glyphs update). Inactive (dormant) sessions list below, newest first.
-// Statuses arrive stored/computed from the service; this view computes nothing
-// and never re-sorts.
+// Layout (rev 18–19): Active sessions are CARDS in a grid, in the server's
+// stable order (first_seen asc — a card never moves while its session stays
+// active; only glyphs update). Inactive (dormant) sessions list below, newest
+// first. Beneath both, the EVENTS FEED — the record plane: recent events,
+// newest first, each labeled with its stream. Statuses arrive stored/computed
+// from the service; this view computes nothing and never re-sorts.
 
 function relTime(iso: string | null): string {
   if (!iso) return '';
@@ -149,10 +150,25 @@ export default function SessionsView() {
           </>
         )}
 
+        {board && board.events.length > 0 && (
+          <section className="ledger-section">
+            <h2>Events</h2>
+            <ul className="ledger-feed">
+              {board.events.map((e) => (
+                <li key={e.id} className="ledger-feed-line" title={(e.body || []).join('\n')}>
+                  <span className="ledger-feed-stream">{e.stream_id}</span>
+                  <span className="ledger-feed-headline">{e.headline}</span>
+                  <span className="ledger-when" title={e.at}>{relTime(e.at)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {board && (
           <p className="ledger-asof">
-            as of {board.as_of ? new Date(board.as_of).toLocaleTimeString() : ''} · events and work
-            products land here in phase 2
+            as of {board.as_of ? new Date(board.as_of).toLocaleTimeString() : ''} · work products
+            land in a later phase
           </p>
         )}
       </div>

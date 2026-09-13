@@ -3,7 +3,7 @@ from enum import Enum as PyEnum
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Enum, ForeignKey, Text,
-    UniqueConstraint,
+    UniqueConstraint, JSON,
 )
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import declarative_base
@@ -146,6 +146,53 @@ class LedgerSession(Base):
     archived_at = Column(DateTime, nullable=True)            # when the user dismissed it; cleared when a signal re-activates
     transcript_missing_since = Column(DateTime, nullable=True)      # first consecutive sweep miss
     sweep_miss_count = Column(Integer, default=0, nullable=False)   # consecutive misses; expiry at N
+
+
+class LedgerStream(Base):
+    """A named thread of work under management — the record plane (Book rev 19).
+
+    The slug is the identity the API speaks (`stream_id` everywhere), unique per
+    owner — hence the composite key. `meta` is a built-in stream per user
+    (created lazily): it never closes, never attributes sessions, and stays out
+    of the working index. Field-level replace only; the service never merges
+    prose. Staleness (fresh/aging/stale) is computed on read, never stored.
+    """
+    __tablename__ = "ledger_streams"
+    __table_args__ = _UTF8MB4
+
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    id = Column(String(64), primary_key=True)                # the slug ([a-z0-9-]+)
+    title = Column(String(255), nullable=True)
+    state = Column(Text, nullable=True)                      # current-state narrative, rewritten freely
+    next_action = Column(Text, nullable=True)                # the single step that resumes the work
+    open_loops = Column(JSON, nullable=True)                 # string[]
+    working_paths = Column(JSON, nullable=True)              # path[] — attribution hints
+    since = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated = Column(DateTime, default=datetime.utcnow, nullable=False)
+    closed_at = Column(DateTime, nullable=True)
+
+
+class LedgerEvent(Base):
+    """Something that happened — immutable, append-only, server-stamped.
+
+    Created only by POST /ledger/events (and stream closure, which logs its
+    own). Never updated, never deleted. Carries exactly one stream (the slug,
+    scoped to the same owner) and one emitting session — the join records of
+    the session↔stream many-to-many. Emitting is a sign of life: the same
+    transaction writes the emitter's liveness (invariant 9).
+    """
+    __tablename__ = "ledger_events"
+    __table_args__ = _UTF8MB4
+
+    id = Column(String(24), primary_key=True)                # "ev_" + hex, server-generated
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
+    at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    stream_id = Column(String(64), nullable=False, index=True)  # owning stream's slug (per-owner scope)
+    headline = Column(String(500), nullable=False)           # one line, past tense
+    body = Column(JSON, nullable=False)                      # 1–4 markdown strings
+    # Nullable only for stream-closure events logged without an emitter —
+    # POST /ledger/events itself requires it (422).
+    session_id = Column(String(36), ForeignKey("ledger_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
 
 
 class Memory(Base):

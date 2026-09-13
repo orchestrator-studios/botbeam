@@ -15,7 +15,7 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.par
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from config.settings import settings
-from models import LedgerSession
+from models import LedgerSession, LedgerStream, LedgerEvent
 from services.ledger_service import LedgerService, SessionActive
 
 RESULTS: list[bool] = []
@@ -29,7 +29,8 @@ def check(name, ok, detail=""):
 async def main():
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
-        await conn.run_sync(lambda c: LedgerSession.__table__.create(c))
+        for t in (LedgerSession.__table__, LedgerStream.__table__, LedgerEvent.__table__):
+            await conn.run_sync(t.create)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
     async with Session() as db:

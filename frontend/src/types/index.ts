@@ -97,16 +97,41 @@ export interface LedgerSession {
   archived_at: string | null;
   transcript_missing_since: string | null;
   status: LedgerStatus;       // stored — one writer per transition (rev 18)
+  stream_id: string | null;   // computed — board attribution (rev 19), never stored
   activity: LedgerActivity;   // computed — active sessions' glyph only
   relevant: boolean;          // computed — the board filter
 }
 
+// The record plane (rev 19): immutable events + managed streams.
+export interface LedgerEvent {
+  id: string;
+  at: string;
+  stream_id: string;
+  headline: string;
+  body: string[];
+  session_id: string | null;
+}
+
+export interface LedgerStream {
+  id: string;                 // the slug
+  title: string | null;
+  state: string | null;
+  next_action: string | null;
+  open_loops: string[];
+  working_paths: string[];
+  since: string | null;
+  updated: string | null;
+  closed_at: string | null;
+  staleness: 'fresh' | 'aging' | 'stale' | null;  // computed — null when closed
+}
+
 // GET /ledger/board — the data structure the board view renders.
-// Events and products are empty until the record plane lands (phase 2).
+// Sessions (ordering guaranteed server-side), recent events, active streams.
+// Products are absent by decision — deferred to a later phase.
 export interface LedgerBoard {
   sessions: LedgerSession[];
-  events: unknown[];
-  products: unknown[];
+  events: LedgerEvent[];
+  streams: LedgerStream[];
   as_of: string;
 }
 
