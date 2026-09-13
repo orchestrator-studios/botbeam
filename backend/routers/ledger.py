@@ -105,9 +105,9 @@ class LogEvent(BaseModel):
 class StreamClose(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: str = ""
-    # Not in the Book's close body — accepted so the closure event can carry
-    # its emitter (events otherwise require one); flagged as underspecified.
-    session_id: Optional[str] = None
+    # Required (rev 19 ruling): the closure event is an event, and every event
+    # has exactly one emitter — no exceptions.
+    session_id: str
 
 
 def _svc(db: AsyncSession) -> LedgerService:

@@ -190,9 +190,9 @@ class LedgerEvent(Base):
     stream_id = Column(String(64), nullable=False, index=True)  # owning stream's slug (per-owner scope)
     headline = Column(String(500), nullable=False)           # one line, past tense
     body = Column(JSON, nullable=False)                      # 1–4 markdown strings
-    # Nullable only for stream-closure events logged without an emitter —
-    # POST /ledger/events itself requires it (422).
-    session_id = Column(String(36), ForeignKey("ledger_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    # Required with no exceptions (rev 19 ruling): every event has exactly one
+    # emitter — closure events included. No authorless events.
+    session_id = Column(String(36), ForeignKey("ledger_sessions.id", ondelete="CASCADE"), index=True, nullable=False)
 
 
 class Memory(Base):

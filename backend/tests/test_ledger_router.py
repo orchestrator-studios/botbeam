@@ -96,10 +96,13 @@ r = c.post("/ledger/events", json={
 check("unknown stream -> 404 {error:not_found}",
       r.status_code == 404 and r.json()["detail"]["error"] == "not_found", r.text)
 
+r = c.post("/ledger/streams/alpha/close", json={"reason": "done"})
+check("close without session_id -> 422 (emitter required, no exceptions)",
+      r.status_code == 422, r.text)
 r = c.post("/ledger/streams/alpha/close", json={"reason": "done", "session_id": "s1"})
 check("close -> 200 {stream, closure_event}",
       r.status_code == 200 and set(r.json()) == {"stream", "closure_event"}, r.text)
-r = c.post("/ledger/streams/alpha/close", json={"reason": "again"})
+r = c.post("/ledger/streams/alpha/close", json={"reason": "again", "session_id": "s1"})
 check("re-close -> 409 {error:conflict}",
       r.status_code == 409 and r.json()["detail"]["error"] == "conflict", r.text)
 

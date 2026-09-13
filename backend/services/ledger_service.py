@@ -430,13 +430,11 @@ class LedgerService:
         await self.db.refresh(st)
         return self._stream_repr(st, now)
 
-    async def stream_close(
-        self, user_id: int, sid: str, reason: str,
-        session_id: Optional[str] = None,
-    ) -> dict:
+    async def stream_close(self, user_id: int, sid: str, reason: str, session_id: str) -> dict:
         """Close a stream and log the closure event — one transaction. The
-        closure event's emitter is optional (flagged to the Book: the spec's
-        close body carries only `reason`, but events require an emitter)."""
+        emitter is required with no exceptions (rev 19 ruling): closure events
+        are events, and every event has exactly one emitter, whose liveness is
+        written like any other emission (invariant 9)."""
         if sid == META_STREAM:
             raise Conflict("the meta stream never closes")
         st = await self._get_stream(user_id, sid)
@@ -444,11 +442,11 @@ class LedgerService:
             raise NotFound(f'Unknown stream "{sid}"')
         if st.closed_at is not None:
             raise Conflict(f'Stream "{sid}" is already closed')
-        s = None
-        if session_id:
-            s = await self.db.get(LedgerSession, session_id)
-            if s is None or s.user_id != user_id:
-                raise NotFound(f'Unknown session "{session_id}"')
+        if not session_id:
+            raise LedgerError("session_id is required — every event has exactly one emitter")
+        s = await self.db.get(LedgerSession, session_id)
+        if s is None or s.user_id != user_id:
+            raise NotFound(f'Unknown session "{session_id}"')
         now = datetime.utcnow()
         st.closed_at = now
         st.updated = now
@@ -458,8 +456,7 @@ class LedgerService:
             body=[reason or "closed"], session_id=session_id,
         )
         self.db.add(ev)
-        if s is not None:
-            self._liveness(s, now)
+        self._liveness(s, now)
         await self.db.commit()
         await self.db.refresh(st)
         logger.info("ledger stream closed (%s, user=%s)", sid, user_id)

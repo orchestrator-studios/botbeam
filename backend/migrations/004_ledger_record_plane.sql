@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS ledger_events (
   stream_id  VARCHAR(64)  NOT NULL,
   headline   VARCHAR(500) NOT NULL,
   body       JSON         NOT NULL,
-  session_id VARCHAR(36)  NULL,
+  session_id VARCHAR(36)  NOT NULL,
   PRIMARY KEY (id),
   KEY ix_ledger_events_user_id (user_id),
   KEY ix_ledger_events_at (at),
@@ -41,3 +41,10 @@ CREATE TABLE IF NOT EXISTS ledger_events (
   CONSTRAINT fk_levent_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT fk_levent_session FOREIGN KEY (session_id) REFERENCES ledger_sessions(id) ON DELETE CASCADE
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- Emitter required with no exceptions (rev 19 ruling, folded in rather than an
+-- 005 — the record plane carried no rows before this). The MODIFY backstops a
+-- database whose table was created by the brief nullable build (v1.7.0):
+-- create_all never alters, so tighten the column explicitly. No-op when the
+-- table was created by the CREATE above. Run while ledger_events is empty.
+ALTER TABLE ledger_events MODIFY session_id VARCHAR(36) NOT NULL;

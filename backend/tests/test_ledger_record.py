@@ -115,7 +115,7 @@ async def main():
         out = await svc.log_event(U, "meta", "Ledger work logged", ["x"], "sess-a")
         check("meta stream auto-created on first reference",
               out["stream"]["id"] == "meta")
-        await rejects("closing meta -> 409", Conflict, svc.stream_close(U, "meta", "no"))
+        await rejects("closing meta -> 409", Conflict, svc.stream_close(U, "meta", "no", "sess-a"))
 
         # ── attribution rule (invariant 6) ───────────────────────────────────
         rep = await svc.list(U)
@@ -157,14 +157,28 @@ async def main():
         await db.commit()
         check("staleness: stale at 20d", svc.staleness(row) == "stale")
 
+        # Emitter is required with no exceptions (rev 19 ruling).
+        await rejects("close without session_id -> 422", LedgerError,
+                      svc.stream_close(U, "gamma", "done", ""))
+        await rejects("close with unknown session -> 404", NotFound,
+                      svc.stream_close(U, "gamma", "done", "nope"))
+        await db.rollback()
+
+        # Emitter liveness on close: end the session first, closing revives it.
+        await svc.apply_event(U, "sess-a", "SessionEnd")
         n_ev = await count(db, LedgerEvent)
         out = await svc.stream_close(U, "gamma", "work done", session_id="sess-a")
         check("close sets closed_at + logs the closure event (one transaction)",
               out["stream"]["closed_at"] is not None
               and out["closure_event"]["stream_id"] == "gamma"
+              and out["closure_event"]["session_id"] == "sess-a"
               and await count(db, LedgerEvent) == n_ev + 1, out)
+        s_row = (await db.execute(select(LedgerSession).where(
+            LedgerSession.id == "sess-a"))).scalar_one()
+        check("close writes the emitter's liveness (invariant 9)",
+              s_row.status == "active", s_row.status)
         check("closed stream: staleness null", out["stream"]["staleness"] is None)
-        await rejects("re-close -> 409", Conflict, svc.stream_close(U, "gamma", "again"))
+        await rejects("re-close -> 409", Conflict, svc.stream_close(U, "gamma", "again", "sess-a"))
         await rejects("log to closed stream -> 409", Conflict,
                       svc.log_event(U, "gamma", "late", ["x"], "sess-a"))
         await db.rollback()
