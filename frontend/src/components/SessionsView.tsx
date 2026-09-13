@@ -18,9 +18,11 @@ import type { LedgerBoard, LedgerSession } from '../types';
 // session cards. Identity is never color-alone — the stream title always
 // rides with the swatch. Events and deliverables carry their session as a
 // chip (emitter / the one mid-run). meta EVENTS render stream-less
-// (bookkeeping, not a thread) — meta deliverables do not: a thing being made
-// always shows its home stream. Statuses arrive stored/computed from the
-// service; this view computes nothing and never re-sorts.
+// (bookkeeping, not a thread); meta DELIVERABLES name their home as a plain
+// muted label — no pill, because meta has no stream card or feed presence
+// to link to, and a clickable pill must never point at a place that isn't
+// on the board. Statuses arrive stored/computed from the service; this view
+// computes nothing and never re-sorts.
 
 // Categorical palette (dataviz reference, dark column) — validated against
 // this app's surface: 8/8 pass lightness band, chroma floor, CVD separation,
@@ -347,8 +349,11 @@ export default function SessionsView() {
                     return (
                       <li key={d.id}
                         className={`ledger-deliverable-card${hover.stream === d.stream_id ? ' hl' : ''}${streamFilter === d.stream_id ? ' selected' : ''}`}
-                        style={{ borderLeftColor: streamColor(d.stream_id) }}
-                        onMouseEnter={() => setHover({ stream: d.stream_id, session: worker?.id })}
+                        style={d.stream_id !== 'meta' ? { borderLeftColor: streamColor(d.stream_id) } : undefined}
+                        onMouseEnter={() => setHover({
+                          stream: d.stream_id !== 'meta' ? d.stream_id : null,
+                          session: worker?.id,
+                        })}
                         onMouseLeave={() => setHover({})}>
                         <div className="ledger-stream-top">
                           <span className="ledger-label">{d.name}</span>
@@ -356,9 +361,16 @@ export default function SessionsView() {
                         </div>
                         {d.state && <span className="ledger-stream-state">{d.state}</span>}
                         <div className="ledger-deliverable-links">
-                          <StreamTag slug={d.stream_id}
-                            title={streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
-                            onClick={() => setStreamFilter((f) => (f === d.stream_id ? null : d.stream_id))} />
+                          {d.stream_id === 'meta' ? (
+                            <span className="ledger-meta-tag"
+                              title="Home: the ledger system itself — bookkeeping, not a board stream">
+                              {streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
+                            </span>
+                          ) : (
+                            <StreamTag slug={d.stream_id}
+                              title={streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
+                              onClick={() => setStreamFilter((f) => (f === d.stream_id ? null : d.stream_id))} />
+                          )}
                           {worker?.open_run && (
                             <span className="ledger-run-line"
                               title={`${worker.label || worker.id} is working this now`}>
