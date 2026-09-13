@@ -16,6 +16,7 @@ Record (events + streams + runs + deliverables):
   GET  /ledger/events                     newest first; ?stream_id ?session_id ?since ?limit
   PUT  /ledger/streams/{sid}              create / field-replace a stream (409 closed)
   POST /ledger/streams/{sid}/close        close + log the closure event (one transaction)
+  POST /ledger/streams/{sid}/reopen       undo a close + log the reopen event (409 if open)
   GET  /ledger/streams                    ?status=active|closed|all, staleness computed
   POST /ledger/runs                       open a run (mint the deliverable in the same call)
   POST /ledger/runs/{rid}/close           end it — closed (state advances) | abandoned
@@ -128,6 +129,12 @@ class StreamClose(BaseModel):
     session_id: str
 
 
+class StreamReopen(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = ""
+    session_id: str
+
+
 def _svc(db: AsyncSession) -> LedgerService:
     return LedgerService(db)
 
@@ -200,6 +207,20 @@ async def close_stream(
 ):
     try:
         out = await _svc(db).stream_close(user.user_id, sid, body.reason, session_id=body.session_id)
+    except ValueError as e:
+        await db.rollback()
+        raise _http(e)
+    await _notify(user.user_id)
+    return out
+
+
+@router.post("/streams/{sid}/reopen")
+async def reopen_stream(
+    sid: str, body: StreamReopen,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        out = await _svc(db).stream_reopen(user.user_id, sid, body.reason, session_id=body.session_id)
     except ValueError as e:
         await db.rollback()
         raise _http(e)

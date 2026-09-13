@@ -456,6 +456,37 @@ class LedgerService:
         logger.info("ledger stream closed (%s, user=%s)", sid, user_id)
         return {"stream": self._stream_repr(st, now), "closure_event": self._event_repr(ev)}
 
+    async def stream_reopen(self, user_id: int, sid: str, reason: str, session_id: str) -> dict:
+        """Reopen a closed stream and log the reopen event — one transaction,
+        the mirror of stream_close. The record keeps both the closure and the
+        reopen; nothing is erased. The stream returns to the board and brings
+        its events and deliverables back with it (the board invariant does
+        that for free)."""
+        st = await self._get_stream(user_id, sid)
+        if st is None:
+            raise NotFound(f'Unknown stream "{sid}"')
+        if st.closed_at is None:
+            raise Conflict(f'Stream "{sid}" is not closed')
+        if not session_id:
+            raise LedgerError("session_id is required — every event has exactly one emitter")
+        s = await self.db.get(LedgerSession, session_id)
+        if s is None or s.user_id != user_id:
+            raise NotFound(f'Unknown session "{session_id}"')
+        now = datetime.utcnow()
+        st.closed_at = None
+        st.updated = now
+        ev = LedgerEvent(
+            id=f"ev_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
+            stream_id=sid, headline=f'Stream "{sid}" reopened — {reason or "back on the board"}',
+            body=[reason or "reopened"], session_id=session_id,
+        )
+        self.db.add(ev)
+        self._liveness(s, now)
+        await self.db.commit()
+        await self.db.refresh(st)
+        logger.info("ledger stream reopened (%s, user=%s)", sid, user_id)
+        return {"stream": self._stream_repr(st, now), "reopen_event": self._event_repr(ev)}
+
     async def streams_list(self, user_id: int, status: str = "active") -> list[dict]:
         q = select(LedgerStream).where(LedgerStream.user_id == user_id)
         if status == "active":

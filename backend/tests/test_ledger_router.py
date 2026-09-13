@@ -105,6 +105,12 @@ check("close -> 200 {stream, closure_event}",
 r = c.post("/ledger/streams/alpha/close", json={"reason": "again", "session_id": "s1"})
 check("re-close -> 409 {error:conflict}",
       r.status_code == 409 and r.json()["detail"]["error"] == "conflict", r.text)
+r = c.post("/ledger/streams/alpha/reopen", json={"reason": "back", "session_id": "s1"})
+check("reopen -> 200 {stream, reopen_event}",
+      r.status_code == 200 and set(r.json()) == {"stream", "reopen_event"}, r.text)
+r = c.post("/ledger/streams/alpha/reopen", json={"reason": "again", "session_id": "s1"})
+check("reopen an open stream -> 409 {error:conflict}",
+      r.status_code == 409 and r.json()["detail"]["error"] == "conflict", r.text)
 
 r = c.get("/ledger/index")
 check("GET /ledger/index -> text/markdown",

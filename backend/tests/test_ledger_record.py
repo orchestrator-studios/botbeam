@@ -241,6 +241,21 @@ async def main():
         check("data endpoint still serves the closed stream's history",
               any(e["stream_id"] == "meta" for e in await svc.events_list(U)))
 
+        # ── reopen: the mirror of close ──────────────────────────────────────
+        await rejects("reopen an open stream -> 409", Conflict,
+                      svc.stream_reopen(U, "alpha", "why", "sess-a"))
+        await db.rollback()
+        await rejects("reopen unknown stream -> 404", NotFound,
+                      svc.stream_reopen(U, "ghost", "why", "sess-a"))
+        await db.rollback()
+        out = await svc.stream_reopen(U, "meta", "history back on the board", "sess-a")
+        check("reopen clears closed_at and logs the reopen event",
+              out["stream"]["closed_at"] is None
+              and "reopened" in out["reopen_event"]["headline"], out)
+        b = await svc.board(U)
+        check("reopened stream brings its events back to the board",
+              any(e["stream_id"] == "meta" for e in b["events"]), b["events"])
+
         # ── reset clears all three stores ────────────────────────────────────
         await svc.reset(U)
         check("reset truncates sessions + events + streams",
