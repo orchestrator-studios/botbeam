@@ -32,11 +32,25 @@ function Glyph({ s }: { s: LedgerSession }) {
   );
 }
 
+const COLLAPSE_KEY = 'botbeam.ledger.inactiveCollapsed';
+
 export default function SessionsView() {
   const { ledgerBump } = useBotBeam();
   const [board, setBoard] = useState<LedgerBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  // Collapse state persists across reloads by ruling — a section that
+  // re-expands on every refresh would be worse than no collapse at all.
+  const [inactiveCollapsed, setInactiveCollapsed] = useState(
+    () => localStorage.getItem(COLLAPSE_KEY) === '1',
+  );
+
+  function toggleInactive() {
+    setInactiveCollapsed((c) => {
+      localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1');
+      return !c;
+    });
+  }
 
   const load = useCallback(() => {
     botbeamApi.getLedgerBoard()
@@ -76,6 +90,9 @@ export default function SessionsView() {
   // by recency) — filter preserves it, so no client-side sorting.
   const active = sessions.filter((s) => s.status === 'active');
   const inactive = sessions.filter((s) => s.status !== 'active');
+  // meta stays in the payload (it labels event pills) but isn't a working
+  // stream, so it doesn't get a card.
+  const streams = (board?.streams ?? []).filter((s) => s.id !== 'meta');
 
   return (
     <div className="main ledger-view">
@@ -126,7 +143,14 @@ export default function SessionsView() {
 
             {inactive.length > 0 && (
               <section className="ledger-section">
-                <h2>Inactive</h2>
+                <h2>
+                  <button className="ledger-collapse" onClick={toggleInactive}
+                    aria-expanded={!inactiveCollapsed}>
+                    <span className={`ledger-chevron${inactiveCollapsed ? ' collapsed' : ''}`}>▾</span>
+                    Inactive ({inactive.length})
+                  </button>
+                </h2>
+                {!inactiveCollapsed && (
                 <ul className="ledger-list">
                   {inactive.map((s) => (
                     <li key={s.id} className={`ledger-card ${s.status}`}>
@@ -145,24 +169,55 @@ export default function SessionsView() {
                     </li>
                   ))}
                 </ul>
+                )}
               </section>
             )}
           </>
         )}
 
-        {board && board.events.length > 0 && (
-          <section className="ledger-section">
-            <h2>Events</h2>
-            <ul className="ledger-feed">
-              {board.events.map((e) => (
-                <li key={e.id} className="ledger-feed-line" title={(e.body || []).join('\n')}>
-                  <span className="ledger-feed-stream">{e.stream_id}</span>
-                  <span className="ledger-feed-headline">{e.headline}</span>
-                  <span className="ledger-when" title={e.at}>{relTime(e.at)}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+        {board && (streams.length > 0 || board.events.length > 0) && (
+          <div className="ledger-columns">
+            <section className="ledger-section">
+              <h2>Streams</h2>
+              {streams.length === 0 ? (
+                <p className="ledger-empty">No active streams.</p>
+              ) : (
+                <ul className="ledger-streams">
+                  {streams.map((s) => (
+                    <li key={s.id} className={`ledger-stream-card ${s.staleness || ''}`}>
+                      <div className="ledger-stream-top">
+                        <span className="ledger-label">{s.title || s.id}</span>
+                        {(s.open_loops?.length ?? 0) > 0 && (
+                          <span className="ledger-loops" title={s.open_loops.join('\n')}>
+                            {s.open_loops.length} open
+                          </span>
+                        )}
+                      </div>
+                      {s.state && <span className="ledger-stream-state">{s.state}</span>}
+                      {s.next_action && <span className="ledger-stream-next">→ {s.next_action}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="ledger-section">
+              <h2>Events</h2>
+              {board.events.length === 0 ? (
+                <p className="ledger-empty">No events logged yet.</p>
+              ) : (
+                <ul className="ledger-feed">
+                  {board.events.map((e) => (
+                    <li key={e.id} className="ledger-feed-line" title={(e.body || []).join('\n')}>
+                      <span className="ledger-feed-stream">{e.stream_id}</span>
+                      <span className="ledger-feed-headline">{e.headline}</span>
+                      <span className="ledger-when" title={e.at}>{relTime(e.at)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
         )}
 
         {board && (
