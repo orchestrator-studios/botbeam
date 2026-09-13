@@ -9,7 +9,7 @@ load_dotenv(_backend_dir / ".env", override=True)
 
 class Settings(BaseSettings):
     APP_NAME: str = "BotBeam"
-    VERSION: str = "2.0.0"
+    VERSION: str = "2.0.1"
 
     # Database (MySQL — same stack as kh / table-that)
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
