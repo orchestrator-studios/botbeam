@@ -79,7 +79,19 @@ export interface MemorySummary {
 // are STORED — turn_state (rev 17) and the lifecycle status (rev 18).
 // Three states, no fourth (rev 20 retired 'expired' and the sweep).
 export type LedgerStatus = 'active' | 'dormant' | 'archived';
-export type LedgerActivity = 'waiting' | 'processing' | 'run' | null;
+// The circle only (rev 21): the bolt moved to its own channel, open_run.
+export type LedgerActivity = 'waiting' | 'processing' | null;
+
+// The ⚡ — a JOIN on a declared open run, not a computation (rev 21).
+// started_at is load-bearing; elapsed_s is convenience.
+export interface OpenRun {
+  id: string;
+  intent: string;
+  deliverable_id: string;
+  deliverable_name: string | null;
+  started_at: string;
+  elapsed_s: number;
+}
 
 export interface LedgerSession {
   id: string;
@@ -92,13 +104,13 @@ export interface LedgerSession {
   last_event_at: string | null;
   last_prompt_at: string | null;
   last_stop_at: string | null;
-  last_run_at: string | null;
   ended_at: string | null;
   ever_prompted: boolean;
   archived_at: string | null;
   status: LedgerStatus;       // stored — one writer per transition (rev 18)
   stream_id: string | null;   // computed — board attribution (rev 19), never stored
-  activity: LedgerActivity;   // computed — active sessions' glyph only
+  open_run: OpenRun | null;   // joined — the ⚡ (rev 21); orthogonal to activity
+  activity: LedgerActivity;   // computed — active sessions' circle only
   relevant: boolean;          // computed — the board filter
 }
 

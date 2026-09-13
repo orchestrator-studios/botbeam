@@ -49,14 +49,32 @@ function relTime(iso: string | null): string {
   return `${Math.floor(secs / 86400)}d ago`;
 }
 
+// Two independent channels (rev 21): the circle answers "whose move is it"
+// (turn_state), the bolt answers "is a deliverable being worked" (open_run).
+// All four combinations are legal — ring+⚡ is work parked mid-run.
 function Glyph({ s }: { s: LedgerSession }) {
-  if (s.activity === 'waiting') return <span className="ledger-dot waiting" title="Waiting — your move" />;
+  const circle = s.activity === 'waiting'
+    ? <span className="ledger-dot waiting" title="Waiting — your move" />
+    : <span className="ledger-dot processing" title="Processing — Claude is working" />;
   return (
-    <span className="ledger-glyph" title={s.activity === 'run' ? 'Run — mutating right now' : 'Processing — Claude is working'}>
-      <span className="ledger-dot processing" />
-      {s.activity === 'run' && <span className="ledger-bolt">{'⚡'}</span>}
+    <span className="ledger-glyph">
+      {circle}
+      {s.open_run && (
+        <span className="ledger-bolt"
+          title={`Run open — ${s.open_run.intent}${s.open_run.deliverable_name ? ` · ${s.open_run.deliverable_name}` : ''}`}>
+          {'⚡'}
+        </span>
+      )}
     </span>
   );
+}
+
+// "⚡ 6m · cutting rev 21" — elapsed ticks locally from started_at.
+function fmtElapsed(startedAt: string): string {
+  const secs = Math.max(0, (Date.now() - new Date(startedAt).getTime()) / 1000);
+  if (secs < 60) return `${Math.floor(secs)}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  return `${Math.floor(secs / 3600)}h${Math.floor((secs % 3600) / 60)}m`;
 }
 
 // A stream's identity mark: color swatch + display name, everywhere the same.
@@ -217,6 +235,11 @@ export default function SessionsView() {
                       <span className="ledger-meta">
                         {s.workspace_id || ''}{s.machine ? ` · ${s.machine}` : ''}
                       </span>
+                      {s.open_run && (
+                        <span className="ledger-run-line" title={s.open_run.deliverable_name || ''}>
+                          ⚡ {fmtElapsed(s.open_run.started_at)} · {s.open_run.intent}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -237,6 +260,12 @@ export default function SessionsView() {
                   {inactive.map((s) => (
                     <li key={s.id} className={`ledger-card ${s.status}${hover.session === s.id ? ' hl' : ''}`}>
                       <span className="ledger-dot dormant" title="Dormant — exited; resumable" />
+                      {s.open_run && (
+                        <span className="ledger-bolt dim"
+                          title={`Leaked open run — ${s.open_run.intent} (close or abandon it)`}>
+                          {'⚡'}
+                        </span>
+                      )}
                       <div className="ledger-card-main">
                         <span className="ledger-label">{s.label || s.id.slice(0, 8)}</span>
                         <span className="ledger-meta">

@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from models import LedgerSession, LedgerStream, LedgerEvent
+from models import LedgerSession, LedgerStream, LedgerEvent, LedgerRun, LedgerDeliverable
 from routers import ledger
 from services.auth_service import get_current_user
 from database import get_async_db
@@ -49,7 +49,7 @@ app.dependency_overrides[get_async_db] = override_db
 
 async def make_tables():
     async with engine.begin() as conn:
-        for t in (LedgerSession.__table__, LedgerStream.__table__, LedgerEvent.__table__):
+        for t in (LedgerSession.__table__, LedgerStream.__table__, LedgerEvent.__table__, LedgerDeliverable.__table__, LedgerRun.__table__):
             await conn.run_sync(t.create)
 
 import asyncio
@@ -119,6 +119,37 @@ check("GET /ledger/board carries sessions+events+streams, no products",
 r = c.get("/ledger/search", params={"q": "shipped"})
 check("GET /ledger/search finds the event",
       r.status_code == 200 and any(h["kind"] == "event" for h in r.json()["items"]), r.text)
+
+# ── runs + deliverables over the wire (rev 21) ───────────────────────────────
+r = c.post("/ledger/runs", json={
+    "session_id": "s1", "intent": "wire check",
+    "create_deliverable": {"name": "Widget", "home": "C:\\w", "stream_id": "meta"}})
+check("POST /ledger/runs -> 201 {run, deliverable, session} with open_run join",
+      r.status_code == 201 and set(r.json()) == {"run", "deliverable", "session"}
+      and r.json()["session"]["open_run"]["intent"] == "wire check", r.text)
+run_id = r.json()["run"]["id"]
+dl_id = r.json()["deliverable"]["id"]
+
+r = c.post("/ledger/runs", json={"session_id": "s1", "intent": "again", "deliverable_id": dl_id})
+check("second open -> 409", r.status_code == 409, r.text)
+
+r = c.post(f"/ledger/deliverables/{dl_id}/retire")
+check("retire with open run -> 409", r.status_code == 409, r.text)
+
+r = c.get("/ledger/runs", params={"open": "true"})
+check("GET /ledger/runs?open=true lists the open run",
+      r.status_code == 200 and [x["id"] for x in r.json()["items"]] == [run_id], r.text)
+
+r = c.post(f"/ledger/runs/{run_id}/close", json={"session_id": "s1", "outcome": "closed", "state": "v1"})
+check("close -> 200, deliverable advanced",
+      r.status_code == 200 and r.json()["deliverable"]["state"] == "v1", r.text)
+
+r = c.post(f"/ledger/deliverables/{dl_id}/retire")
+check("retire after close -> 200 retired",
+      r.status_code == 200 and r.json()["status"] == "retired", r.text)
+r = c.get("/ledger/deliverables", params={"status": "retired"})
+check("GET /ledger/deliverables?status=retired lists it",
+      r.status_code == 200 and [x["id"] for x in r.json()["items"]] == [dl_id], r.text)
 
 print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
 sys.exit(0 if all(RESULTS) else 1)

@@ -26,10 +26,9 @@ class Settings(BaseSettings):
 
     PORT: int = int(os.getenv("PORT", "4888"))
 
-    # Ledger (The Ledger Book; woodshed docs/ledger/). One display window —
-    # the ⚡ decays past it. Lifecycle status is stored, never timed (rev 18);
-    # expiry and the sweep were retired outright (rev 20).
-    LEDGER_RUN_WINDOW_SECONDS: int = int(os.getenv("LEDGER_RUN_WINDOW_SECONDS", "120"))
+    # Ledger (The Ledger Book; woodshed docs/ledger/). No windows, no timers:
+    # statuses are stored (rev 18), expiry/sweep retired (rev 20), and the ⚡
+    # is a declared open run, not a decaying clock (rev 21).
     # Test-only: enables POST /ledger/admin/reset (truncate the caller's ledger rows).
     LEDGER_ADMIN_RESET: bool = os.getenv("LEDGER_ADMIN_RESET", "false").lower() == "true"
 

@@ -16,16 +16,30 @@ per transition (Book rev 17 + 18) — nothing lifecycle is derived at read time:
   inference papers over it. Expiry and the sweep were retired outright: a
   transcript aging off one machine's disk was never a state of the session.
 
-RECORD — events and streams, admitted by judgment (the skill). Events are
-immutable and exist only via log_event, an atomic composite: append the event,
-write the emitting session's liveness (invariant 9 — logging is a sign of
-life; turn_state untouched), apply the optional stream update. Streams are
-field-replaced, never merged; `meta` is a per-user built-in that never closes,
-never attributes, and stays out of the orientation index.
+RECORD — events, streams, runs, and deliverables, admitted by judgment (the
+skill). Events are immutable and exist only via log_event, an atomic
+composite: append the event, write the emitting session's liveness
+(invariant 9 — logging is a sign of life; turn_state untouched), apply the
+optional stream update. Streams are field-replaced, never merged; `meta` is a
+per-user built-in that never closes, never attributes, and stays out of the
+orientation index.
 
-Computed per read (display windows and filters only): activity (the glyph),
-relevant (the board filter), staleness (fresh/aging/stale), and stream
-attribution (a session's board label — never stored, so nothing can rebrand it).
+Runs and deliverables (rev 21): a Run is a bounded stretch of work on exactly
+one Deliverable, declared at BOTH ends (invariant 10) — opened and closed by
+explicit calls, never timed out; ended_at IS NULL is the board's ⚡, a plain
+query with no window arithmetic. Opening and closing both write the session's
+liveness (invariant 9 extends). A Deliverable persists and is advanced: its
+`state` is rewritten whole by each closing run; its live|retired status is the
+USER'S call via retire/unretire, never Claude's, never a run outcome. The old
+computed run glyph (last_run_at inside a decaying window, fed by PostToolUse
+against a mutating-tool list) is deleted — it inferred state from a clock and
+was inverted for the case it existed to show. PostToolUse remains as a pure
+heartbeat.
+
+Computed per read (display windows and filters only): activity (the circle),
+open_run (a JOIN, not a computation — the bolt), relevant (the board filter),
+staleness (fresh/aging/stale), and stream attribution (a session's board
+label — never stored, so nothing can rebrand it).
 """
 from __future__ import annotations
 
@@ -38,17 +52,16 @@ from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.settings import settings
-from models import LedgerSession, LedgerStream, LedgerEvent
+from models import LedgerSession, LedgerStream, LedgerEvent, LedgerRun, LedgerDeliverable
 
 logger = logging.getLogger("botbeam.ledger")
 
 # Lifecycle signals the hooks may send — a closed set (422 otherwise).
+# PostToolUse is a pure heartbeat since rev 21: nothing consumes the tool
+# payload, but the in-turn liveness signal stays (recency through long turns,
+# and the future crash repair needs a sensor to tell "crashed mid-run" from
+# "ten-minute build").
 SIGNALS = {"SessionStart", "UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"}
-
-# Run-vs-read classification is service policy, per the Book: hooks transmit
-# every tool completion unclassified; only these refresh last_run_at.
-MUTATING_TOOLS = {"Write", "Edit", "NotebookEdit", "Bash", "PowerShell"}
 
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 META_STREAM = "meta"
@@ -93,16 +106,13 @@ class LedgerService:
 
     @staticmethod
     def activity(s: LedgerSession, now: Optional[datetime] = None) -> Optional[str]:
-        """Active sessions' glyph: stored turn_state, plus the run bolt while
-        the last mutation is inside the run window. None off the active band."""
+        """Active sessions' circle: the stored turn_state, nothing more. The
+        bolt is a separate channel (open_run — a join on declared runs) since
+        rev 21; the two render independently and all four combinations are
+        legal. None off the active band."""
         if s.status != "active":
             return None
-        if s.turn_state == "processing":
-            now = now or datetime.utcnow()
-            run_window = timedelta(seconds=settings.LEDGER_RUN_WINDOW_SECONDS)
-            in_run = s.last_run_at is not None and (now - s.last_run_at) <= run_window
-            return "run" if in_run else "processing"
-        return "waiting"
+        return s.turn_state
 
     @staticmethod
     def staleness(st: LedgerStream, now: Optional[datetime] = None) -> Optional[str]:
@@ -118,8 +128,10 @@ class LedgerService:
         return "stale"
 
     def _repr(self, s: LedgerSession, now: Optional[datetime] = None,
-              stream_id: Optional[str] = None) -> dict:
-        """The Session wire representation: stored facts + computed display fields."""
+              stream_id: Optional[str] = None, open_run: Optional[dict] = None) -> dict:
+        """The Session wire representation: stored facts + computed display
+        fields. open_run is a JOIN, not a computation — the caller resolves it
+        (bulk in list(), singly elsewhere)."""
         return {
             "id": s.id,
             "workspace_id": s.workspace_id,
@@ -130,12 +142,12 @@ class LedgerService:
             "last_event_at": _iso(s.last_event_at),
             "last_prompt_at": _iso(s.last_prompt_at),
             "last_stop_at": _iso(s.last_stop_at),
-            "last_run_at": _iso(s.last_run_at),
             "ended_at": _iso(s.ended_at),
             "ever_prompted": bool(s.ever_prompted),
             "archived_at": _iso(s.archived_at),
             "status": s.status,
             "stream_id": stream_id,
+            "open_run": open_run,
             "activity": self.activity(s, now),
             "relevant": bool(s.ever_prompted) and s.status != "archived",
         }
@@ -153,6 +165,35 @@ class LedgerService:
             "updated": _iso(st.updated),
             "closed_at": _iso(st.closed_at),
             "staleness": LedgerService.staleness(st, now),
+        }
+
+    @staticmethod
+    def _run_repr(r: LedgerRun, now: Optional[datetime] = None) -> dict:
+        now = now or datetime.utcnow()
+        end = r.ended_at or now
+        return {
+            "id": r.id,
+            "deliverable_id": r.deliverable_id,
+            "session_id": r.session_id,
+            "intent": r.intent,
+            "started_at": _iso(r.started_at),
+            "ended_at": _iso(r.ended_at),
+            "outcome": r.outcome,
+            "elapsed_s": max(0, int((end - r.started_at).total_seconds())),
+        }
+
+    @staticmethod
+    def _deliverable_repr(d: LedgerDeliverable) -> dict:
+        return {
+            "id": d.id,
+            "at": _iso(d.at),
+            "name": d.name,
+            "home": d.home,
+            "state": d.state,
+            "status": d.status,
+            "stream_id": d.stream_id,
+            "last_run_id": d.last_run_id,
+            "updated": _iso(d.updated),
         }
 
     @staticmethod
@@ -204,15 +245,13 @@ class LedgerService:
         elif event == "SessionEnd":
             s.turn_state = "waiting"
             s.ended_at = now
-        elif event == "PostToolUse":
-            name = (tool or {}).get("name")
-            if name in MUTATING_TOOLS:
-                s.last_run_at = now
+        # PostToolUse: pure heartbeat — the universal writes above are the
+        # whole effect; the tool payload is accepted and ignored (rev 21).
 
         await self.db.commit()
         await self.db.refresh(s)
         logger.debug("ledger signal %s (session=%s, user=%s)", event, sid[:6], user_id)
-        return self._repr(s, now, stream_id=await self._attribution_one(user_id, s))
+        return await self._repr_one(user_id, s, now)
 
     @staticmethod
     def _liveness(s: LedgerSession, now: datetime, is_session_end: bool = False) -> None:
@@ -238,7 +277,7 @@ class LedgerService:
         await self.db.commit()
         await self.db.refresh(s)
         logger.info("ledger archive (session=%s, user=%s)", sid[:6], user_id)
-        return self._repr(s)
+        return await self._repr_one(user_id, s)
 
     async def unarchive(self, user_id: int, sid: str) -> dict:
         s = await self._own(user_id, sid)
@@ -246,7 +285,7 @@ class LedgerService:
         s.archived_at = None
         await self.db.commit()
         await self.db.refresh(s)
-        return self._repr(s)
+        return await self._repr_one(user_id, s)
 
     async def archive_batch(
         self, user_id: int,
@@ -351,7 +390,7 @@ class LedgerService:
                     stream_id, session_id[:6], user_id)
         return {
             "event": self._event_repr(ev),
-            "session": self._repr(s, now, stream_id=await self._attribution_one(user_id, s)),
+            "session": await self._repr_one(user_id, s, now),
             "stream": self._stream_repr(st, now),
         }
 
@@ -436,6 +475,216 @@ class LedgerService:
         out.sort(key=lambda r: r["updated"] or "", reverse=True)
         return out
 
+    # ── record plane: runs + deliverables (rev 21) ───────────────────────────
+
+    async def run_open(
+        self, user_id: int, session_id: str, intent: str,
+        deliverable_id: Optional[str] = None,
+        create_deliverable: Optional[dict] = None,
+    ) -> dict:
+        """POST /ledger/runs — the only way a run (or a deliverable) comes
+        into existence. Atomic: run + optional deliverable mint + the opening
+        session's liveness (invariant 9 extends; turn_state untouched)."""
+        now = datetime.utcnow()
+        if not intent or not intent.strip():
+            raise LedgerError("intent is required — what this work IS, not how big it is")
+        if not session_id:
+            raise LedgerError("session_id is required")
+        if bool(deliverable_id) == bool(create_deliverable):
+            raise LedgerError("pass exactly one of deliverable_id or create_deliverable")
+
+        s = await self.db.get(LedgerSession, session_id)
+        if s is None or s.user_id != user_id:
+            raise NotFound(f'Unknown session "{session_id}"')
+
+        # One open run per session — forces an honest close-or-abandon at the
+        # boundary. Recovery after a crash: list your open runs, abandon the
+        # stale one, open the new one.
+        existing = await self._open_run_row(user_id, session_id)
+        if existing is not None:
+            raise Conflict(f'session already has an open run ("{existing.intent}", {existing.id})')
+
+        if deliverable_id:
+            d = await self.db.get(LedgerDeliverable, deliverable_id)
+            if d is None or d.user_id != user_id:
+                raise NotFound(f'Unknown deliverable "{deliverable_id}"')
+            if d.status == "retired":
+                raise Conflict(f'Deliverable "{d.name}" is retired — unretire it first')
+        else:
+            name = (create_deliverable or {}).get("name")
+            home = (create_deliverable or {}).get("home")
+            stream_id = (create_deliverable or {}).get("stream_id")
+            if not name or not home or not stream_id:
+                raise LedgerError("create_deliverable needs name, home, and stream_id")
+            st = await self._get_stream(user_id, stream_id)
+            if st is None and stream_id == META_STREAM:
+                st = await self._ensure_meta(user_id, now)
+            if st is None:
+                # No nested create_stream — PUT /ledger/streams/{id} is the
+                # create path; one call beforehand (rev 21 ruling).
+                raise NotFound(f'Unknown stream "{stream_id}" — create it first (PUT /ledger/streams/{{id}})')
+            d = LedgerDeliverable(
+                id=f"dl_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
+                name=name, home=home, stream_id=stream_id, updated=now,
+            )
+            self.db.add(d)
+
+        run = LedgerRun(
+            id=f"run_{uuid.uuid4().hex[:16]}", user_id=user_id,
+            deliverable_id=d.id, session_id=session_id,
+            intent=intent.strip(), started_at=now,
+        )
+        self.db.add(run)
+        self._liveness(s, now)
+        await self.db.commit()
+        logger.info("ledger run opened (%s, deliverable=%s, session=%s, user=%s)",
+                    run.id, d.id, session_id[:6], user_id)
+        return {
+            "run": self._run_repr(run, now),
+            "deliverable": self._deliverable_repr(d),
+            "session": await self._repr_one(user_id, s, now),
+        }
+
+    async def run_close(
+        self, user_id: int, run_id: str, session_id: str,
+        outcome: str, state: Optional[str] = None,
+    ) -> dict:
+        """POST /ledger/runs/{id}/close — the only way a run ends. The closer
+        may differ from the opener (ruling: that IS the manual cleanup path
+        for crash-leaked runs). closed advances the deliverable; abandoned
+        leaves it untouched."""
+        run = await self.db.get(LedgerRun, run_id)
+        if run is None or run.user_id != user_id:
+            raise NotFound(f'Unknown run "{run_id}"')
+        if run.ended_at is not None:
+            raise Conflict(f'Run "{run_id}" is already ended ({run.outcome})')
+        if outcome not in ("closed", "abandoned"):
+            raise LedgerError('outcome must be "closed" or "abandoned"')
+        if outcome == "closed" and (state is None or not state.strip()):
+            raise LedgerError("state is required on closed — the closer must consider it (resubmitting it verbatim is legitimate)")
+        if outcome == "abandoned" and state is not None:
+            raise LedgerError("state is refused on abandoned — the deliverable is untouched")
+        if not session_id:
+            raise LedgerError("session_id is required — the closer, for liveness")
+        s = await self.db.get(LedgerSession, session_id)
+        if s is None or s.user_id != user_id:
+            raise NotFound(f'Unknown session "{session_id}"')
+
+        now = datetime.utcnow()
+        run.ended_at = now
+        run.outcome = outcome
+        d = await self.db.get(LedgerDeliverable, run.deliverable_id)
+        if outcome == "closed":
+            d.state = state.strip()
+            d.last_run_id = run.id
+            d.updated = now
+        self._liveness(s, now)
+        await self.db.commit()
+        logger.info("ledger run %s (%s, user=%s)", outcome, run_id, user_id)
+        return {
+            "run": self._run_repr(run, now),
+            "deliverable": self._deliverable_repr(d),
+            "session": await self._repr_one(user_id, s, now),
+        }
+
+    async def deliverable_set_status(self, user_id: int, dl_id: str, retired: bool) -> dict:
+        """retire / unretire — the USER'S call, never Claude's (rev 21 ruling:
+        a run ending says nothing about whether the thing is finished with)."""
+        d = await self.db.get(LedgerDeliverable, dl_id)
+        if d is None or d.user_id != user_id:
+            raise NotFound(f'Unknown deliverable "{dl_id}"')
+        if retired:
+            open_run = (await self.db.execute(
+                select(LedgerRun).where(LedgerRun.user_id == user_id,
+                                        LedgerRun.deliverable_id == dl_id,
+                                        LedgerRun.ended_at.is_(None))
+            )).scalars().first()
+            if open_run is not None:
+                raise Conflict(f'Deliverable has an open run ({open_run.id}) — close it first')
+        d.status = "retired" if retired else "live"
+        d.updated = datetime.utcnow()
+        await self.db.commit()
+        logger.info("ledger deliverable %s (%s, user=%s)",
+                    "retired" if retired else "unretired", dl_id, user_id)
+        return self._deliverable_repr(d)
+
+    async def runs_list(
+        self, user_id: int, open_only: bool = False,
+        session_id: Optional[str] = None, deliverable_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        q = select(LedgerRun).where(LedgerRun.user_id == user_id)
+        if open_only:
+            q = q.where(LedgerRun.ended_at.is_(None))
+        if session_id:
+            q = q.where(LedgerRun.session_id == session_id)
+        if deliverable_id:
+            q = q.where(LedgerRun.deliverable_id == deliverable_id)
+        q = q.order_by(LedgerRun.started_at.desc(), LedgerRun.id.desc()).limit(limit)
+        rows = (await self.db.execute(q)).scalars().all()
+        now = datetime.utcnow()
+        return [self._run_repr(r, now) for r in rows]
+
+    async def deliverables_list(
+        self, user_id: int, stream_id: Optional[str] = None,
+        status: str = "live", limit: int = 100,
+    ) -> list[dict]:
+        q = select(LedgerDeliverable).where(LedgerDeliverable.user_id == user_id)
+        if stream_id:
+            q = q.where(LedgerDeliverable.stream_id == stream_id)
+        if status in ("live", "retired"):
+            q = q.where(LedgerDeliverable.status == status)
+        q = q.order_by(LedgerDeliverable.updated.desc()).limit(limit)
+        rows = (await self.db.execute(q)).scalars().all()
+        return [self._deliverable_repr(d) for d in rows]
+
+    # ── open-run join (the ⚡ — stored facts, joined per read) ────────────────
+
+    async def _open_run_row(self, user_id: int, session_id: str) -> Optional[LedgerRun]:
+        return (await self.db.execute(
+            select(LedgerRun).where(LedgerRun.user_id == user_id,
+                                    LedgerRun.session_id == session_id,
+                                    LedgerRun.ended_at.is_(None))
+        )).scalars().first()
+
+    async def _open_runs(self, user_id: int, rows: list[LedgerSession]) -> dict:
+        """sid → open_run join dict ({id, intent, deliverable_id,
+        deliverable_name, started_at, elapsed_s}) for the sessions given."""
+        ids = [s.id for s in rows]
+        if not ids:
+            return {}
+        runs = (await self.db.execute(
+            select(LedgerRun).where(LedgerRun.user_id == user_id,
+                                    LedgerRun.session_id.in_(ids),
+                                    LedgerRun.ended_at.is_(None))
+        )).scalars().all()
+        if not runs:
+            return {}
+        dl_ids = {r.deliverable_id for r in runs}
+        dls = (await self.db.execute(
+            select(LedgerDeliverable).where(LedgerDeliverable.id.in_(dl_ids))
+        )).scalars().all()
+        names = {d.id: d.name for d in dls}
+        now = datetime.utcnow()
+        out: dict = {}
+        for r in runs:
+            out[r.session_id] = {
+                "id": r.id,
+                "intent": r.intent,
+                "deliverable_id": r.deliverable_id,
+                "deliverable_name": names.get(r.deliverable_id),
+                "started_at": _iso(r.started_at),   # load-bearing
+                "elapsed_s": max(0, int((now - r.started_at).total_seconds())),  # convenience
+            }
+        return out
+
+    async def _repr_one(self, user_id: int, s: LedgerSession,
+                        now: Optional[datetime] = None) -> dict:
+        """Full single-session representation with both joins resolved."""
+        open_runs = await self._open_runs(user_id, [s])
+        return self._repr(s, now, stream_id=await self._attribution_one(user_id, s),
+                          open_run=open_runs.get(s.id))
+
     # ── attribution (computed — never stored) ────────────────────────────────
 
     async def _attribution_one(self, user_id: int, s: LedgerSession) -> Optional[str]:
@@ -510,6 +759,14 @@ class LedgerService:
                 items.append({"kind": "stream", "score": 1.0, "at": st.updated, "record": self._stream_repr(st, now)})
             elif needle in rest:
                 items.append({"kind": "stream", "score": 0.6, "at": st.updated, "record": self._stream_repr(st, now)})
+        deliverables = (await self.db.execute(
+            select(LedgerDeliverable).where(LedgerDeliverable.user_id == user_id)
+        )).scalars().all()
+        for d in deliverables:
+            if needle in (d.name or "").lower():
+                items.append({"kind": "deliverable", "score": 1.0, "at": d.updated, "record": self._deliverable_repr(d)})
+            elif needle in f"{d.state or ''} {d.home or ''}".lower():
+                items.append({"kind": "deliverable", "score": 0.6, "at": d.updated, "record": self._deliverable_repr(d)})
         items.sort(key=lambda r: (-r["score"], -(r["at"].timestamp() if r["at"] else 0)))
         return [{"kind": r["kind"], "score": r["score"], "record": r["record"]} for r in items[:limit]]
 
@@ -562,7 +819,9 @@ class LedgerService:
         rows = (await self.db.execute(q)).scalars().all()
         now = datetime.utcnow()
         attr = await self._attributions(user_id, rows)
-        out = [self._repr(s, now, stream_id=attr.get(s.id)) for s in rows]
+        open_runs = await self._open_runs(user_id, rows)
+        out = [self._repr(s, now, stream_id=attr.get(s.id), open_run=open_runs.get(s.id))
+               for s in rows]
         if relevant is not None:
             out = [r for r in out if r["relevant"] == relevant]
         if stream_id:
@@ -595,8 +854,10 @@ class LedgerService:
     # ── test support ─────────────────────────────────────────────────────────
 
     async def reset(self, user_id: int) -> int:
-        """Truncate the caller's ledger rows — all three stores. Test-only
+        """Truncate the caller's ledger rows — all five stores. Test-only
         (LEDGER_ADMIN_RESET)."""
+        await self.db.execute(delete(LedgerRun).where(LedgerRun.user_id == user_id))
+        await self.db.execute(delete(LedgerDeliverable).where(LedgerDeliverable.user_id == user_id))
         await self.db.execute(delete(LedgerEvent).where(LedgerEvent.user_id == user_id))
         await self.db.execute(delete(LedgerStream).where(LedgerStream.user_id == user_id))
         res = await self.db.execute(delete(LedgerSession).where(LedgerSession.user_id == user_id))

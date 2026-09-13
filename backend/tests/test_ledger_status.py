@@ -15,7 +15,7 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.par
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from config.settings import settings
-from models import LedgerSession, LedgerStream, LedgerEvent
+from models import LedgerSession, LedgerStream, LedgerEvent, LedgerRun, LedgerDeliverable
 from services.ledger_service import LedgerService, SessionActive
 
 RESULTS: list[bool] = []
@@ -29,7 +29,7 @@ def check(name, ok, detail=""):
 async def main():
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
-        for t in (LedgerSession.__table__, LedgerStream.__table__, LedgerEvent.__table__):
+        for t in (LedgerSession.__table__, LedgerStream.__table__, LedgerEvent.__table__, LedgerDeliverable.__table__, LedgerRun.__table__):
             await conn.run_sync(t.create)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -47,18 +47,16 @@ async def main():
               r["status"] == "active" and r["turn_state"] == "processing"
               and r["activity"] == "processing" and r["relevant"] is True, r)
 
+        # PostToolUse is a pure heartbeat since rev 21 — the bolt is a declared
+        # open run (its own suite), never a tool-completion inference.
+        before = (await db.get(LedgerSession, "sess-a")).last_event_at
         r = await svc.apply_event(U, "sess-a", "PostToolUse", tool={"name": "Edit"})
-        check("mutating tool within run window -> run bolt", r["activity"] == "run", r)
-
-        # Bolt decays outside the run window (display window, computed).
-        s = await db.get(LedgerSession, "sess-a")
-        s.last_run_at = datetime.utcnow() - timedelta(seconds=settings.LEDGER_RUN_WINDOW_SECONDS + 5)
-        await db.commit()
-        check("mutation past run window -> processing (bolt decays)",
-              svc.activity(s) == "processing")
+        after = (await db.get(LedgerSession, "sess-a")).last_event_at
+        check("PostToolUse -> heartbeat only (activity stays processing, no bolt)",
+              r["activity"] == "processing" and r["open_run"] is None and after >= before, r)
 
         r = await svc.apply_event(U, "sess-a", "Stop")
-        check("Stop -> waiting even with a recent mutation",
+        check("Stop -> waiting",
               r["turn_state"] == "waiting" and r["activity"] == "waiting", r)
 
         # ── archive is refused while active (409 path) ───────────────────────

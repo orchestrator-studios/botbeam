@@ -2331,6 +2331,7 @@ table.content-table {
 .ledger-dot.waiting { background: transparent; border: 2.5px solid #2ecc55; }
 .ledger-dot.dormant { background: #7a7f78; }
 .ledger-bolt { font-size: 0.8rem; line-height: 1; }
+.ledger-bolt.dim { opacity: 0.5; }  /* a leaked open run on a dormant row */
 .ledger-card-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .ledger-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ledger-meta { color: var(--text-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2415,6 +2416,13 @@ table.content-table {
 
 /* Cross-highlight: hovering an event lights its stream card + session card. */
 .ledger-tile.hl, .ledger-card.hl { border-color: var(--accent); }
+
+/* The open-run line on an active card — "⚡ 6m · cutting rev 21" (rev 21). */
+.ledger-run-line {
+  font-size: 0.78rem; color: var(--text); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .ledger-tile-right { display: inline-flex; align-items: center; gap: 7px; }
 
 /* Feed-filter indicator in the Events header. */

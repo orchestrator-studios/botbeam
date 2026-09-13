@@ -16,7 +16,7 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.par
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from models import LedgerSession, LedgerStream, LedgerEvent
+from models import LedgerSession, LedgerStream, LedgerEvent, LedgerRun, LedgerDeliverable
 from services.ledger_service import LedgerService, LedgerError, NotFound, Conflict
 
 RESULTS: list[bool] = []
@@ -44,7 +44,7 @@ async def count(db, model):
 async def main():
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
-        for t in (LedgerSession.__table__, LedgerStream.__table__, LedgerEvent.__table__):
+        for t in (LedgerSession.__table__, LedgerStream.__table__, LedgerEvent.__table__, LedgerDeliverable.__table__, LedgerRun.__table__):
             await conn.run_sync(t.create)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 

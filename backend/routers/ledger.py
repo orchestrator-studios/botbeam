@@ -11,13 +11,19 @@ Telemetry (sessions):
   POST /ledger/sessions/archive           batch: by prefixes, or all dormant with a keep-list
   GET  /ledger/sessions                   list; ?status= filters the stored column
 
-Record (events + streams):
+Record (events + streams + runs + deliverables):
   POST /ledger/events                     log one event — atomic composite (invariant 9)
   GET  /ledger/events                     newest first; ?stream_id ?session_id ?since ?limit
   PUT  /ledger/streams/{sid}              create / field-replace a stream (409 closed)
   POST /ledger/streams/{sid}/close        close + log the closure event (one transaction)
   GET  /ledger/streams                    ?status=active|closed|all, staleness computed
-  GET  /ledger/search                     ?q= across events and streams (recall's endpoint)
+  POST /ledger/runs                       open a run (mint the deliverable in the same call)
+  POST /ledger/runs/{rid}/close           end it — closed (state advances) | abandoned
+  GET  /ledger/runs                       ?open=true is the board's ⚡ — ended_at IS NULL
+  GET  /ledger/deliverables               ?stream_id ?status=live|retired|all
+  POST /ledger/deliverables/{did}/retire  user's call, never Claude's (409 on open run)
+  POST /ledger/deliverables/{did}/unretire
+  GET  /ledger/search                     ?q= across events, streams, deliverables (recall)
 
 Views:
   GET  /ledger/index                      orientation markdown (SessionStart hook injects it)
@@ -89,6 +95,29 @@ class LogEvent(BaseModel):
     session_id: str
     stream_update: Optional[StreamUpdate] = None
     create_stream: Optional[CreateStream] = None
+
+
+class CreateDeliverable(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    home: str
+    stream_id: str
+
+
+class RunOpen(BaseModel):
+    """POST /ledger/runs body — exactly one of deliverable_id / create_deliverable."""
+    model_config = ConfigDict(extra="forbid")
+    session_id: str
+    intent: str
+    deliverable_id: Optional[str] = None
+    create_deliverable: Optional[CreateDeliverable] = None
+
+
+class RunClose(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str
+    outcome: str
+    state: Optional[str] = None
 
 
 class StreamClose(BaseModel):
@@ -176,6 +205,88 @@ async def close_stream(
         raise _http(e)
     await _notify(user.user_id)
     return out
+
+
+@router.post("/runs", status_code=201)
+async def open_run(
+    body: RunOpen,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        out = await _svc(db).run_open(
+            user.user_id, session_id=body.session_id, intent=body.intent,
+            deliverable_id=body.deliverable_id,
+            create_deliverable=body.create_deliverable.model_dump() if body.create_deliverable else None,
+        )
+    except ValueError as e:
+        await db.rollback()
+        raise _http(e)
+    await _notify(user.user_id)
+    return out
+
+
+@router.post("/runs/{rid}/close")
+async def close_run(
+    rid: str, body: RunClose,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        out = await _svc(db).run_close(
+            user.user_id, rid, session_id=body.session_id,
+            outcome=body.outcome, state=body.state)
+    except ValueError as e:
+        await db.rollback()
+        raise _http(e)
+    await _notify(user.user_id)
+    return out
+
+
+@router.get("/runs")
+async def list_runs(
+    open: Optional[bool] = None, session_id: Optional[str] = None,
+    deliverable_id: Optional[str] = None, limit: int = 100,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    items = await _svc(db).runs_list(
+        user.user_id, open_only=bool(open), session_id=session_id,
+        deliverable_id=deliverable_id, limit=limit)
+    return {"items": items, "next": None}
+
+
+@router.get("/deliverables")
+async def list_deliverables(
+    stream_id: Optional[str] = None, status: str = "live", limit: int = 100,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    items = await _svc(db).deliverables_list(
+        user.user_id, stream_id=stream_id, status=status, limit=limit)
+    return {"items": items, "next": None}
+
+
+@router.post("/deliverables/{did}/retire")
+async def retire_deliverable(
+    did: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        rep = await _svc(db).deliverable_set_status(user.user_id, did, retired=True)
+    except ValueError as e:
+        await db.rollback()
+        raise _http(e)
+    await _notify(user.user_id)
+    return rep
+
+
+@router.post("/deliverables/{did}/unretire")
+async def unretire_deliverable(
+    did: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        rep = await _svc(db).deliverable_set_status(user.user_id, did, retired=False)
+    except ValueError as e:
+        await db.rollback()
+        raise _http(e)
+    await _notify(user.user_id)
+    return rep
 
 
 @router.get("/streams")

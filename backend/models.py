@@ -139,7 +139,6 @@ class LedgerSession(Base):
     last_event_at = Column(DateTime, default=datetime.utcnow, nullable=False)   # heartbeat: every signal
     last_prompt_at = Column(DateTime, nullable=True)         # UserPromptSubmit
     last_stop_at = Column(DateTime, nullable=True)           # Stop (informational; turn_state carries the status)
-    last_run_at = Column(DateTime, nullable=True)            # PostToolUse with a mutating tool — the ⚡
     ended_at = Column(DateTime, nullable=True)               # SessionEnd (informational; status carries the lifecycle)
     ever_prompted = Column(Boolean, default=False, nullable=False)  # relevance gate — filters picker ghosts
     archived_at = Column(DateTime, nullable=True)            # when the user dismissed it; cleared when a signal re-activates
@@ -190,6 +189,54 @@ class LedgerEvent(Base):
     # Required with no exceptions (rev 19 ruling): every event has exactly one
     # emitter — closure events included. No authorless events.
     session_id = Column(String(36), ForeignKey("ledger_sessions.id", ondelete="CASCADE"), index=True, nullable=False)
+
+
+class LedgerDeliverable(Base):
+    """A thing that was made — record + link; the payload lives at its home.
+
+    Persists and is ADVANCED (Book rev 21): `state` is mutable by design,
+    rewritten whole by each closing run — events stay immutable, the mutation
+    lives on the noun that was always going to change. Born only inside the
+    run that needs it (POST /ledger/runs with create_deliverable); no direct
+    create or update endpoint exists. `status` (live|retired) is declared by
+    the user via retire/unretire — never by Claude, and never by a run ending.
+    """
+    __tablename__ = "ledger_deliverables"
+    __table_args__ = _UTF8MB4
+
+    id = Column(String(24), primary_key=True)                # "dl_" + hex, server-generated
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
+    at = Column(DateTime, default=datetime.utcnow, nullable=False)   # first registration
+    name = Column(String(255), nullable=False)               # stable across its life
+    home = Column(String(1024), nullable=False)              # canonical location — exactly one
+    state = Column(Text, nullable=True)                      # where it stands — rewritten by closing runs
+    status = Column(String(16), default="live", nullable=False)      # live|retired — user's call
+    stream_id = Column(String(64), nullable=False, index=True)       # owning stream slug (per-owner scope)
+    last_run_id = Column(String(24), nullable=True)          # the run that last advanced it
+    updated = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class LedgerRun(Base):
+    """A bounded stretch of work against exactly one deliverable (Book rev 21).
+
+    Declared at BOTH ends (invariant 10): started_at written by the open call,
+    ended_at by the close — no timer, sweep, or heuristic may end a run.
+    ended_at IS NULL is the definition of open; the board's ⚡ is a plain query
+    on it, no window arithmetic. A crashed session leaks an open run — the same
+    known gap as crashed-active, cleaned up by a non-opener close (allowed by
+    ruling) until the repair mechanism lands.
+    """
+    __tablename__ = "ledger_runs"
+    __table_args__ = _UTF8MB4
+
+    id = Column(String(24), primary_key=True)                # "run_" + hex, server-generated
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
+    deliverable_id = Column(String(24), ForeignKey("ledger_deliverables.id", ondelete="CASCADE"), index=True, nullable=False)
+    session_id = Column(String(36), ForeignKey("ledger_sessions.id", ondelete="CASCADE"), index=True, nullable=False)
+    intent = Column(String(500), nullable=False)             # what the work IS, not how big
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime, nullable=True)               # null = open
+    outcome = Column(String(16), nullable=True)              # closed|abandoned; null while open
 
 
 class Memory(Base):
