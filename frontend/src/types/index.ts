@@ -77,7 +77,8 @@ export interface MemorySummary {
 // The wire representation from /ledger: stored facts (snake_case, matching the
 // service) plus the computed display fields (activity, relevant). Both statuses
 // are STORED — turn_state (rev 17) and the lifecycle status (rev 18).
-export type LedgerStatus = 'active' | 'dormant' | 'archived' | 'expired';
+// Three states, no fourth (rev 20 retired 'expired' and the sweep).
+export type LedgerStatus = 'active' | 'dormant' | 'archived';
 export type LedgerActivity = 'waiting' | 'processing' | 'run' | null;
 
 export interface LedgerSession {
@@ -95,7 +96,6 @@ export interface LedgerSession {
   ended_at: string | null;
   ever_prompted: boolean;
   archived_at: string | null;
-  transcript_missing_since: string | null;
   status: LedgerStatus;       // stored — one writer per transition (rev 18)
   stream_id: string | null;   // computed — board attribution (rev 19), never stored
   activity: LedgerActivity;   // computed — active sessions' glyph only

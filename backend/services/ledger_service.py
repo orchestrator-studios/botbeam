@@ -8,12 +8,13 @@ per transition (Book rev 17 + 18) — nothing lifecycle is derived at read time:
   turn_state (waiting|processing) — UserPromptSubmit → processing, Stop /
   SessionEnd → waiting. The hook plane's alone; event emission never touches it.
 
-  status (active|dormant|archived|expired) — every hook signal except
-  SessionEnd → active (this is what un-archives and un-expires); SessionEnd →
-  dormant; POST /archive → archived (409 while active); POST /unarchive →
-  dormant; the sweep → expired at N consecutive transcript misses.
-  A crashed session keeps status='active' — an accepted known gap until a
-  sweep-repair mechanism lands; deliberately no inference papers over it.
+  status (active|dormant|archived — three states, no fourth since rev 20) —
+  every hook signal except SessionEnd → active (this is what un-archives);
+  SessionEnd → dormant; POST /archive → archived (409 while active);
+  POST /unarchive → dormant. A crashed session keeps status='active' — an
+  accepted known gap until a repair mechanism lands; deliberately no
+  inference papers over it. Expiry and the sweep were retired outright: a
+  transcript aging off one machine's disk was never a state of the session.
 
 RECORD — events and streams, admitted by judgment (the skill). Events are
 immutable and exist only via log_event, an atomic composite: append the event,
@@ -133,11 +134,10 @@ class LedgerService:
             "ended_at": _iso(s.ended_at),
             "ever_prompted": bool(s.ever_prompted),
             "archived_at": _iso(s.archived_at),
-            "transcript_missing_since": _iso(s.transcript_missing_since),
             "status": s.status,
             "stream_id": stream_id,
             "activity": self.activity(s, now),
-            "relevant": bool(s.ever_prompted) and s.status not in ("archived", "expired"),
+            "relevant": bool(s.ever_prompted) and s.status != "archived",
         }
 
     @staticmethod
@@ -214,19 +214,16 @@ class LedgerService:
 
     @staticmethod
     def _liveness(s: LedgerSession, now: datetime, is_session_end: bool = False) -> None:
-        """The universal writes: heartbeat, expiry-fact resets, and the status.
-        Every signal but SessionEnd declares the session active — the explicit
-        un-archive / un-expire (rev 18), not a derivation. Event emission
-        counts as a signal here (invariant 9) and never touches turn_state."""
+        """The universal writes: heartbeat and the status. Every signal but
+        SessionEnd declares the session active and clears archived_at — the
+        explicit un-archive (rev 18), not a derivation. Event emission counts
+        as a signal here (invariant 9) and never touches turn_state."""
         s.last_event_at = now
-        s.transcript_missing_since = None
-        s.sweep_miss_count = 0
         if is_session_end:
             s.status = "dormant"
         else:
-            if s.status == "archived":
-                s.archived_at = None
             s.status = "active"
+            s.archived_at = None
 
     # ── archive / unarchive ──────────────────────────────────────────────────
 
@@ -279,43 +276,6 @@ class LedgerService:
         await self.db.commit()
         logger.info("ledger batch archive (%d sessions, user=%s)", len(out), user_id)
         return [self._repr(s, now) for s in out]
-
-    # ── sweep ────────────────────────────────────────────────────────────────
-
-    async def sweep_report(self, user_id: int, machine: str, observed: list[dict]) -> int:
-        """One machine's transcript-presence observations. Returns rows changed."""
-        now = datetime.utcnow()
-        applied = 0
-        for o in observed:
-            sid = o.get("session_id")
-            if not sid:
-                continue
-            s = await self.db.get(LedgerSession, sid)
-            if s is None or s.user_id != user_id or (s.machine and machine and s.machine != machine):
-                continue
-            if o.get("transcript_present"):
-                if s.transcript_missing_since is not None or s.sweep_miss_count:
-                    s.transcript_missing_since = None
-                    s.sweep_miss_count = 0
-                    applied += 1
-            else:
-                if s.transcript_missing_since is None:
-                    s.transcript_missing_since = now
-                s.sweep_miss_count += 1
-                # The sweep is the one writer of 'expired' (rev 18). "No event
-                # since" is structural: any signal zeroes the miss count, so
-                # reaching the threshold means the session never spoke again.
-                if s.sweep_miss_count >= settings.LEDGER_EXPIRY_SWEEP_MISSES:
-                    s.status = "expired"
-                applied += 1
-            # Stale-turn_state cleanup: a non-active row stuck at 'processing'
-            # (e.g. backfilled from a crash by migration 003) is repaired here —
-            # an explicit write, not an inference at read time.
-            if s.turn_state == "processing" and s.status != "active":
-                s.turn_state = "waiting"
-                applied += 1
-        await self.db.commit()
-        return applied
 
     # ── record plane: events ─────────────────────────────────────────────────
 

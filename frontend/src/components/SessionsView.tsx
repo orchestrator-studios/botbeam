@@ -4,7 +4,7 @@ import { botbeamApi } from '../lib/api/botbeamApi';
 import type { LedgerBoard, LedgerSession } from '../types';
 
 // The board obeys the Ledger Book's session cheat sheet (woodshed docs/ledger/):
-// Rule 1 — it lists every session ever prompted, minus archived, minus expired;
+// Rule 1 — it lists every session ever prompted, minus the ones you archived;
 // Rule 2 — the glyph: solid green = processing, +⚡ = run, ring = waiting.
 // Layout (rev 18–19): Active sessions are CARDS in a grid, in the server's
 // stable order (first_seen asc — a card never moves while its session stays
@@ -83,9 +83,9 @@ export default function SessionsView() {
         <div className="ledger-head">
           <h1>Sessions</h1>
           <p>
-            Every session you ever prompted, minus the ones you archived, minus the ones whose
-            transcript is gone. Active sessions hold their card — green is working, a ring is
-            waiting on you. Exited sessions drop to the inactive list; archive what you're done with.
+            Every session you ever prompted, minus the ones you archived. Active sessions hold
+            their card — green is working, a ring is waiting on you. Exited sessions drop to the
+            inactive list; archive what you're done with.
           </p>
           {inactive.length > 0 && (
             <button className="btn btn-ghost ledger-clear" onClick={() => setConfirmClear(true)}>

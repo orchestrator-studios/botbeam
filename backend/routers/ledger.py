@@ -9,7 +9,6 @@ Telemetry (sessions):
   POST /ledger/sessions/{sid}/archive     dismiss a dormant session (409 if active)
   POST /ledger/sessions/{sid}/unarchive   restore one
   POST /ledger/sessions/archive           batch: by prefixes, or all dormant with a keep-list
-  POST /ledger/sessions/sweep-report      one machine's transcript-presence observations
   GET  /ledger/sessions                   list; ?status= filters the stored column
 
 Record (events + streams):
@@ -63,16 +62,6 @@ class BatchArchive(BaseModel):
     prefixes: Optional[list[str]] = None
     all: bool = False
     keep: Optional[list[str]] = None
-
-
-class SweepObservation(BaseModel):
-    session_id: str
-    transcript_present: bool
-
-
-class SweepReport(BaseModel):
-    machine: str
-    observed: list[SweepObservation]
 
 
 class CreateStream(BaseModel):
@@ -217,18 +206,6 @@ async def index(user=Depends(get_current_user), db: AsyncSession = Depends(get_a
 
 
 # ── telemetry plane ──────────────────────────────────────────────────────────
-
-@router.post("/sessions/sweep-report")
-async def sweep_report(
-    body: SweepReport,
-    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
-):
-    applied = await _svc(db).sweep_report(
-        user.user_id, body.machine, [o.model_dump() for o in body.observed])
-    if applied:
-        await _notify(user.user_id)
-    return {"applied": applied}
-
 
 @router.post("/sessions/archive")
 async def archive_batch(

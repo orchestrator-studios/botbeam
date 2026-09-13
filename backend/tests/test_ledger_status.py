@@ -92,49 +92,19 @@ async def main():
         check("signal on archived -> active, archived_at cleared (un-archive is a write)",
               r["status"] == "active" and r["archived_at"] is None and r["relevant"] is True, r)
 
-        # ── sweep: expiry at N consecutive misses ────────────────────────────
+        # ── three states, no fourth (rev 20) ─────────────────────────────────
+        # A second active session; b goes dormant then reactivates by signal.
         await svc.apply_event(U, "sess-b", "UserPromptSubmit", cwd="/w/beta", machine="m1")
         await svc.apply_event(U, "sess-b", "SessionEnd")
-        miss = [{"session_id": "sess-b", "transcript_present": False}]
-        for _ in range(settings.LEDGER_EXPIRY_SWEEP_MISSES - 1):
-            await svc.sweep_report(U, "m1", miss)
-        s = await db.get(LedgerSession, "sess-b")
-        check(f"{settings.LEDGER_EXPIRY_SWEEP_MISSES - 1} misses -> still dormant, not expired",
-              s.status == "dormant" and s.sweep_miss_count == settings.LEDGER_EXPIRY_SWEEP_MISSES - 1)
-        await svc.sweep_report(U, "m1", miss)
-        s = await db.get(LedgerSession, "sess-b")
-        check(f"{settings.LEDGER_EXPIRY_SWEEP_MISSES} consecutive misses -> sweep writes expired",
-              s.status == "expired")
-        check("expired -> not relevant (hidden from the board)",
-              svc._repr(s)["relevant"] is False)
-
-        # Expiry applies to a crashed-but-active session too — the sweep is the
-        # writer; status is not consulted first.
-        await svc.apply_event(U, "sess-c", "UserPromptSubmit", cwd="/w/gamma", machine="m1")
-        for _ in range(settings.LEDGER_EXPIRY_SWEEP_MISSES):
-            await svc.sweep_report(U, "m1", [{"session_id": "sess-c", "transcript_present": False}])
-        s = await db.get(LedgerSession, "sess-c")
-        check("active session, transcript gone N sweeps -> expired", s.status == "expired")
-
         r = await svc.apply_event(U, "sess-b", "Stop")
-        check("signal after expired -> active, expiry facts reset (un-expire is a write)",
-              r["status"] == "active" and r["transcript_missing_since"] is None, r)
+        check("signal after dormant -> active (the one recovery rule, no special cases)",
+              r["status"] == "active", r)
 
-        # ── sweep: stale-turn_state repair on non-active rows ────────────────
-        s = await db.get(LedgerSession, "sess-c")            # expired above
-        s.turn_state = "processing"                          # as migration 003 backfill could leave it
-        await db.commit()
-        await svc.sweep_report(U, "m1", [{"session_id": "sess-c", "transcript_present": False}])
-        s = await db.get(LedgerSession, "sess-c")
-        check("sweep repairs stale 'processing' on a non-active row",
-              s.turn_state == "waiting")
-
-        # A crashed session keeps status='active' — the accepted rev 18 gap:
-        # sweep observing its transcript present must NOT touch its status.
+        # A crashed session keeps status='active' — the accepted known gap:
+        # nothing observes or infers it back to dormant (repair mechanism deferred).
         await svc.apply_event(U, "sess-d", "UserPromptSubmit", cwd="/w/delta", machine="m1")
-        await svc.sweep_report(U, "m1", [{"session_id": "sess-d", "transcript_present": True}])
         s = await db.get(LedgerSession, "sess-d")
-        check("crashed-active stays active (no sweep inference — known gap)",
+        check("crashed-active stays active (no inference — known gap)",
               s.status == "active" and s.turn_state == "processing")
 
         # ── batch archive: dormant only, keep-list honored ───────────────────
