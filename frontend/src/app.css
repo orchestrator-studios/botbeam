@@ -2341,7 +2341,18 @@ table.content-table {
   color: var(--text-muted); font-size: 1.1rem; line-height: 1; padding: 4px 6px; border-radius: 6px;
 }
 .ledger-archive:hover { color: var(--text); background: rgba(128,128,128,0.15); }
+.ledger-session-chip.board { font-style: italic; opacity: 0.85; }
 .ledger-asof { color: var(--text-muted); font-size: 0.75rem; margin-top: 18px; }
+/* Undo for board acts. Closing takes the card off the board (invariant 10),
+   so the inverse has nothing to click on — it lives here until the next act. */
+.ledger-undo {
+  display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px;
+  font-size: 0.85rem; color: var(--text-muted);
+}
+.ledger-undo-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--accent); text-decoration: underline;
+}
 /* Collapsible Inactive section (rev 20 layout ruling; state persists). */
 .ledger-collapse {
   background: none; border: none; cursor: pointer; padding: 0;

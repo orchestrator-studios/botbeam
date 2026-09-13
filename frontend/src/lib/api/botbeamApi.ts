@@ -1,6 +1,6 @@
 import { get, post, patch, put, del, delJson } from './index';
 import { settings } from '../../config/settings';
-import type { Device, User, Memory, MemorySummary, MemoryCategory, LedgerBoard, LedgerSession } from '../../types';
+import type { Device, User, Memory, MemorySummary, MemoryCategory, LedgerBoard, LedgerSession, LedgerStream, LedgerDeliverable } from '../../types';
 
 // ── request/response wrappers (specific to these endpoints, not domain objects;
 // names mirror backend/routers/auth.py) ──
@@ -72,6 +72,23 @@ export const botbeamApi = {
     post<LedgerSession>(`/ledger/sessions/${encodeURIComponent(id)}/unarchive`),
   archiveAllDormant: (keep?: string[]): Promise<{ items: LedgerSession[] }> =>
     post<{ items: LedgerSession[] }>('/ledger/sessions/archive', { all: true, keep }),
+
+  // ── Board-initiated record-plane acts (invariant 11) ──
+  // The board is an actor like a session is: every write names who did it, in
+  // one field. From here that is always "board" — the user acting at the
+  // interface. Closing and retiring each log an event carrying it.
+  closeStream: (id: string, reason: string): Promise<{ stream: LedgerStream }> =>
+    post<{ stream: LedgerStream }>(
+      `/ledger/streams/${encodeURIComponent(id)}/close`, { reason, actor: 'board' }),
+  reopenStream: (id: string, reason: string): Promise<{ stream: LedgerStream }> =>
+    post<{ stream: LedgerStream }>(
+      `/ledger/streams/${encodeURIComponent(id)}/reopen`, { reason, actor: 'board' }),
+  retireDeliverable: (id: string): Promise<LedgerDeliverable> =>
+    post<LedgerDeliverable>(
+      `/ledger/deliverables/${encodeURIComponent(id)}/retire`, { actor: 'board' }),
+  unretireDeliverable: (id: string): Promise<LedgerDeliverable> =>
+    post<LedgerDeliverable>(
+      `/ledger/deliverables/${encodeURIComponent(id)}/unretire`, { actor: 'board' }),
 
   proxyUrl: (url: string): string => `${settings.apiUrl}/api/proxy?url=${encodeURIComponent(url)}`,
 };

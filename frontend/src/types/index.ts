@@ -121,7 +121,7 @@ export interface LedgerEvent {
   stream_id: string;
   headline: string;
   body: string[];
-  session_id: string | null;
+  actor: string;            // "session:<uuid>" | "board" — invariant 11
 }
 
 export interface LedgerStream {

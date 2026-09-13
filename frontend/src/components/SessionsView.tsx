@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useBotBeam } from '../context/BotBeamContext';
 import { botbeamApi } from '../lib/api/botbeamApi';
-import type { LedgerBoard, LedgerSession } from '../types';
+import type { LedgerBoard, LedgerSession, LedgerStream, LedgerDeliverable } from '../types';
 
 // The board obeys the Ledger Book's session cheat sheet (woodshed docs/ledger/):
 // Rule 1 — it lists every session ever prompted, minus the ones you archived;
@@ -41,6 +41,12 @@ function streamColor(slug: string): string {
 
 function prettySlug(slug: string): string {
   return slug.replace(/-/g, ' ');
+}
+
+// The actor is one prefixed identifier (invariant 11) — "session:<uuid>" or
+// "board". Type comes from the prefix; a type with one instance is its own id.
+function actorSession(actor: string): string | null {
+  return actor.startsWith('session:') ? actor.slice('session:'.length) : null;
 }
 
 function relTime(iso: string | null): string {
@@ -90,8 +96,23 @@ function StreamTag({ slug, title, onClick }: { slug: string; title: string; onCl
   );
 }
 
-// The emitting session, in the sessions' own visual language: a chip with a
-// mini glyph when the session is on the board (live), muted id otherwise.
+// Who acted. A session shows in the sessions' own visual language — a chip with
+// a mini glyph when it's on the board, a muted id otherwise. The board shows as
+// itself: the user at the interface is not a running thing, so no liveness dot.
+function ActorChip({ actor, sessionById }: {
+  actor: string; sessionById: Record<string, LedgerSession>;
+}) {
+  const sid = actorSession(actor);
+  if (!sid) {
+    return (
+      <span className="ledger-session-chip board" title="Done from the BotBeam interface">
+        board
+      </span>
+    );
+  }
+  return <SessionChip s={sessionById[sid]} sid={sid} />;
+}
+
 function SessionChip({ s, sid }: { s: LedgerSession | undefined; sid: string | null }) {
   if (!sid) return null;
   if (!s) return <span className="ledger-session-chip gone" title={sid}>{sid.slice(0, 6)}</span>;
@@ -150,6 +171,37 @@ export default function SessionsView() {
       setError(e instanceof Error ? e.message : 'Could not archive');
     }
   }
+
+  // Closing a stream or retiring a deliverable removes its card — invariant 10
+  // takes the stream's events and deliverables out of the view with it. So the
+  // undo has nothing left to click on, and the button would be a one-way door
+  // for a misclick. `undo` holds the inverse of the last board act until the
+  // next one; the service has reopen/unretire precisely so this is possible.
+  const [undo, setUndo] = useState<{ label: string; run: () => Promise<unknown> } | null>(null);
+
+  async function act(fn: () => Promise<unknown>, failed: string,
+                     undoLabel?: string, undoFn?: () => Promise<unknown>) {
+    try {
+      await fn();
+      setError(null);
+      setUndo(undoLabel && undoFn ? { label: undoLabel, run: undoFn } : null);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : failed);
+    }
+  }
+
+  const closeStream = (s: LedgerStream) => act(
+    () => botbeamApi.closeStream(s.id, 'closed from the board'),
+    'Could not close the stream',
+    `Closed "${s.title || s.id}"`,
+    () => botbeamApi.reopenStream(s.id, 'back on the board'));
+
+  const retireDeliverable = (d: LedgerDeliverable) => act(
+    () => botbeamApi.retireDeliverable(d.id),
+    'Could not retire the deliverable',
+    `Retired "${d.name}"`,
+    () => botbeamApi.unretireDeliverable(d.id));
 
   async function clearDormant() {
     setConfirmClear(false);
@@ -224,6 +276,13 @@ export default function SessionsView() {
         </div>
 
         {error && <p className="form-error">{error}</p>}
+        {undo && (
+          <p className="ledger-undo">
+            {undo.label}.{' '}
+            <button className="ledger-undo-btn"
+              onClick={() => act(undo.run, 'Could not undo')}>Undo</button>
+          </p>
+        )}
 
         {board === null ? (
           <p className="ledger-empty">Loading…</p>
@@ -328,6 +387,11 @@ export default function SessionsView() {
                               {s.open_loops.length} open
                             </span>
                           )}
+                          <button className="ledger-archive"
+                            title="Close — takes the stream and everything on it off the board (undo appears above)"
+                            onClick={(e) => { e.stopPropagation(); closeStream(s); }}>
+                            &times;
+                          </button>
                         </span>
                       </div>
                       {s.state && <span className="ledger-stream-state">{s.state}</span>}
@@ -355,6 +419,11 @@ export default function SessionsView() {
                         <div className="ledger-stream-top">
                           <span className="ledger-label">{d.name}</span>
                           <span className="ledger-when" title={d.updated || ''}>{relTime(d.updated)}</span>
+                          <button className="ledger-archive"
+                            title="Retire — take this deliverable off the board (undo appears above)"
+                            onClick={(e) => { e.stopPropagation(); retireDeliverable(d); }}>
+                            &times;
+                          </button>
                         </div>
                         {d.state && <span className="ledger-stream-state">{d.state}</span>}
                         <div className="ledger-deliverable-links">
@@ -399,13 +468,13 @@ export default function SessionsView() {
                   <li key={e.id}
                     className="ledger-feed-line"
                     title={(e.body || []).join('\n')}
-                    onMouseEnter={() => setHover({ stream: e.stream_id, session: e.session_id })}
+                    onMouseEnter={() => setHover({ stream: e.stream_id, session: actorSession(e.actor) })}
                     onMouseLeave={() => setHover({})}>
                     <StreamTag slug={e.stream_id}
                       title={streamTitle[e.stream_id] ?? prettySlug(e.stream_id)}
                       onClick={() => setStreamFilter((f) => (f === e.stream_id ? null : e.stream_id))} />
                     <span className="ledger-feed-headline">{e.headline}</span>
-                    <SessionChip s={e.session_id ? sessionById[e.session_id] : undefined} sid={e.session_id} />
+                    <ActorChip actor={e.actor} sessionById={sessionById} />
                     <span className="ledger-when" title={e.at}>{relTime(e.at)}</span>
                   </li>
                 ))}
