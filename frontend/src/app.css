@@ -2357,16 +2357,22 @@ table.content-table {
 @media (max-width: 760px) { .ledger-columns { grid-template-columns: 1fr; } }
 
 .ledger-streams { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+/* The left edge carries the stream's IDENTITY color (set inline, hashed from
+   the slug — the same color as its event pills and session dots). Staleness
+   moved to a labeled tag: identity owns the color channel. */
 .ledger-stream-card {
-  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  display: flex; flex-direction: column; gap: 3px; min-width: 0; cursor: pointer;
   padding: 11px 14px; border: 1px solid var(--border, rgba(128,128,128,0.25));
   border-left-width: 3px; border-radius: 10px; background: var(--surface, rgba(128,128,128,0.06));
 }
-/* Staleness is a colour cue on the card edge: fresh green, aging amber, stale gray. */
-.ledger-stream-card.fresh { border-left-color: #2ecc55; }
-.ledger-stream-card.aging { border-left-color: #e0a552; }
-.ledger-stream-card.stale { border-left-color: #7a7f78; }
+.ledger-stream-card:hover, .ledger-stream-card.hl { border-color: var(--accent); border-left-color: inherit; }
+.ledger-stream-card.selected { outline: 1px solid var(--accent); }
 .ledger-stream-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ledger-stream-cues { display: inline-flex; align-items: baseline; gap: 6px; flex: none; }
+.ledger-staleness { font-size: 0.72rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
+.ledger-staleness::before { content: ''; width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.ledger-staleness.aging::before { background: #fab219; }
+.ledger-staleness.stale::before { background: #777; }
 .ledger-loops {
   flex: none; font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap;
   color: var(--text-muted); border: 1px solid var(--border, rgba(128,128,128,0.3));
@@ -2384,8 +2390,38 @@ table.content-table {
 }
 .ledger-feed-line:last-child { border-bottom: none; }
 .ledger-feed-stream {
-  flex: none; font-size: 0.75rem; font-family: ui-monospace, monospace;
-  color: var(--text-muted); border: 1px solid var(--border, rgba(128,128,128,0.3));
-  border-radius: 999px; padding: 0 8px; white-space: nowrap;
+  flex: none; font-size: 0.75rem; cursor: pointer;
+  color: var(--text); border: 1px solid var(--border, rgba(128,128,128,0.3));
+  border-radius: 999px; padding: 1px 9px 1px 6px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
 }
+.ledger-feed-stream:hover { border-color: var(--accent); }
 .ledger-feed-headline { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-feed-line.meta .ledger-feed-headline { color: var(--text-muted); }
+
+/* The stream identity swatch — same color wherever the stream appears. */
+.stream-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+
+/* The emitting session, in the sessions' own visual language. */
+.ledger-session-chip {
+  flex: none; font-size: 0.72rem; color: var(--text-muted); white-space: nowrap;
+  border: 1px solid var(--border, rgba(128,128,128,0.3)); border-radius: 999px;
+  padding: 1px 8px 1px 6px; display: inline-flex; align-items: center; gap: 5px;
+}
+.ledger-session-chip.gone { opacity: 0.6; font-family: ui-monospace, monospace; }
+.ledger-dot.mini { width: 8px; height: 8px; }
+.ledger-dot.mini.waiting { border-width: 2px; }
+.ledger-dot.mini.processing { box-shadow: none; }
+
+/* Cross-highlight: hovering an event lights its stream card + session card. */
+.ledger-tile.hl, .ledger-card.hl { border-color: var(--accent); }
+.ledger-tile-right { display: inline-flex; align-items: center; gap: 7px; }
+
+/* Feed-filter indicator in the Events header. */
+.ledger-filter-clear {
+  background: none; border: 1px solid var(--border, rgba(128,128,128,0.3));
+  border-radius: 999px; cursor: pointer; color: var(--text);
+  font-size: 0.72rem; padding: 1px 9px 1px 6px; margin-left: 10px;
+  display: inline-flex; align-items: center; gap: 5px; text-transform: none; letter-spacing: 0;
+}
+.ledger-filter-clear:hover { border-color: var(--accent); }
