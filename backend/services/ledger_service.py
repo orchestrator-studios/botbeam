@@ -762,10 +762,14 @@ class LedgerService:
 
     async def index_md(self, user_id: int) -> str:
         """GET /ledger/index — the one-screen orientation, service-rendered
-        markdown, injected at session start."""
+        markdown, injected at session start. A view surface: everything shown
+        references a stream that is shown (closed streams take their recent
+        activity with them; the data endpoints still serve their history)."""
         now = datetime.utcnow()
         streams = await self.streams_list(user_id, status="active")
-        events = await self.events_list(user_id, limit=8)
+        open_ids = {r["id"] for r in streams}
+        events = [e for e in await self.events_list(user_id, limit=40)
+                  if e["stream_id"] in open_ids][:8]
         lines = [f"# Ledger orientation — {now.date().isoformat()}", ""]
         lines.append("## Active streams")
         if streams:
@@ -826,17 +830,28 @@ class LedgerService:
         (rev 19): recent events and the active streams that label them, and
         the live deliverables (rev 21) — rendered beside the streams, with
         the events feed below.
+
+        Invariant: everything on the board references a stream that is on the
+        board. Events and deliverables of a closed stream leave the view with
+        it — rows unchanged, and the data endpoints (/ledger/events,
+        /ledger/deliverables, /ledger/search) still serve them.
         """
         now = datetime.utcnow()
         sessions = await self.list(user_id, relevant=True)   # last_event_at desc
         active = [r for r in sessions if r["status"] == "active"]
         active.sort(key=lambda r: r["first_seen"] or "")
         inactive = [r for r in sessions if r["status"] != "active"]
+        streams = await self.streams_list(user_id, status="active")
+        open_ids = {r["id"] for r in streams}
+        events = [e for e in await self.events_list(user_id, limit=60)
+                  if e["stream_id"] in open_ids][:20]
+        deliverables = [d for d in await self.deliverables_list(user_id, status="live")
+                        if d["stream_id"] in open_ids]
         return {
             "sessions": active + inactive,
-            "events": await self.events_list(user_id, limit=20),
-            "streams": await self.streams_list(user_id, status="active"),
-            "deliverables": await self.deliverables_list(user_id, status="live"),
+            "events": events,
+            "streams": streams,
+            "deliverables": deliverables,
             "as_of": _iso(now),
         }
 

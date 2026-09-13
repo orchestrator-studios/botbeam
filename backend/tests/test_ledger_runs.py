@@ -176,6 +176,18 @@ async def main():
         a = next(r for r in board["sessions"] if r["id"] == "sess-a")
         check("board session carries open_run (the bolt is a join)",
               a["open_run"] is not None and a["open_run"]["intent"] == "board check", a["open_run"])
+        check("board lists the deliverable (its stream is open)",
+              any(x["id"] == dl["id"] for x in board["deliverables"]), board["deliverables"])
+
+        # ── the board invariant: a closed stream takes its things with it ────
+        await svc.run_close(U, a["open_run"]["id"], "sess-a", "abandoned")
+        await svc.stream_close(U, "meta", "board invariant check", "sess-a")
+        board = await svc.board(U)
+        check("closed stream takes its deliverables and events off the board",
+              all(x["stream_id"] != "meta" for x in board["deliverables"])
+              and all(e["stream_id"] != "meta" for e in board["events"]), board["deliverables"])
+        check("data endpoints still serve the closed stream's deliverable",
+              any(x["id"] == dl["id"] for x in await svc.deliverables_list(U, status="live")))
 
         # ── reset clears all five stores ─────────────────────────────────────
         await svc.reset(U)

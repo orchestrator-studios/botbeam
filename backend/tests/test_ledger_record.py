@@ -232,6 +232,14 @@ async def main():
         actives = [r["id"] for r in b["sessions"] if r["status"] == "active"]
         check("board: session ordering guarantee intact (first_seen asc)",
               actives == ["sess-a", "sess-b", "sess-c"], actives)
+        check("board hides closed-stream events (meta closed above), keeps open alpha's",
+              all(e["stream_id"] != "meta" for e in b["events"])
+              and any(e["stream_id"] == "alpha" for e in b["events"]), b["events"])
+        md = await svc.index_md(U)
+        check("index recent activity hides closed streams too",
+              "Ledger work logged" not in md and "Alpha work" in md, md)
+        check("data endpoint still serves the closed stream's history",
+              any(e["stream_id"] == "meta" for e in await svc.events_list(U)))
 
         # ── reset clears all three stores ────────────────────────────────────
         await svc.reset(U)
