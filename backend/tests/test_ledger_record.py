@@ -17,7 +17,9 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from models import LedgerSession, LedgerStream, LedgerEvent, LedgerRun, LedgerDeliverable
-from services.ledger_service import LedgerService, LedgerError, NotFound, Conflict
+from services.ledger_service import (
+    LedgerService, LedgerError, NotFound, Conflict, UnknownActorType,
+)
 
 RESULTS: list[bool] = []
 
@@ -59,7 +61,7 @@ async def main():
         # ── log_event: the atomic composite ──────────────────────────────────
         out = await svc.log_event(
             U, stream_id="alpha", headline="Shipped the thing",
-            body=["commit abc123", "deployed"], session_id="sess-a",
+            body=["commit abc123", "deployed"], actor="session:sess-a",
             create_stream={"title": "Alpha work", "working_paths": ["C:\\code\\alpha"]},
             stream_update={"state": "shipped v1", "next_action": "monitor"},
         )
@@ -81,7 +83,7 @@ async def main():
         await svc.apply_event(U, "sess-a", "SessionEnd")
         await svc.archive(U, "sess-a")
         out = await svc.log_event(U, stream_id="alpha", headline="Logged while archived",
-                                  body=["x"], session_id="sess-a")
+                                  body=["x"], actor="session:sess-a")
         check("log_event un-archives the emitter (status active, archived_at null)",
               out["session"]["status"] == "active"
               and out["session"]["archived_at"] is None, out["session"])
@@ -89,23 +91,23 @@ async def main():
         # ── validations — and nothing partial persists ────────────────────────
         n_ev = await count(db, LedgerEvent)
         await rejects("empty headline -> 422", LedgerError,
-                      svc.log_event(U, "alpha", "  ", ["x"], "sess-a"))
+                      svc.log_event(U, "alpha", "  ", ["x"], "session:sess-a"))
         await rejects("multi-line headline -> 422", LedgerError,
-                      svc.log_event(U, "alpha", "a\nb", ["x"], "sess-a"))
+                      svc.log_event(U, "alpha", "a\nb", ["x"], "session:sess-a"))
         await rejects("0 bullets -> 422", LedgerError,
-                      svc.log_event(U, "alpha", "ok", [], "sess-a"))
+                      svc.log_event(U, "alpha", "ok", [], "session:sess-a"))
         await rejects("5 bullets -> 422", LedgerError,
-                      svc.log_event(U, "alpha", "ok", ["1", "2", "3", "4", "5"], "sess-a"))
-        await rejects("missing session_id -> 422", LedgerError,
+                      svc.log_event(U, "alpha", "ok", ["1", "2", "3", "4", "5"], "session:sess-a"))
+        await rejects("missing actor -> 422", LedgerError,
                       svc.log_event(U, "alpha", "ok", ["x"], ""))
         await rejects("unknown session -> 404", NotFound,
-                      svc.log_event(U, "alpha", "ok", ["x"], "nope"))
+                      svc.log_event(U, "alpha", "ok", ["x"], "session:nope"))
         await rejects("unknown stream without create_stream -> 404", NotFound,
-                      svc.log_event(U, "ghost", "ok", ["x"], "sess-a"))
+                      svc.log_event(U, "ghost", "ok", ["x"], "session:sess-a"))
         await rejects("bad slug -> 422", LedgerError,
-                      svc.log_event(U, "Not A Slug!", "ok", ["x"], "sess-a"))
+                      svc.log_event(U, "Not A Slug!", "ok", ["x"], "session:sess-a"))
         await rejects("unknown stream_update field -> 422", LedgerError,
-                      svc.log_event(U, "alpha", "ok", ["x"], "sess-a",
+                      svc.log_event(U, "alpha", "ok", ["x"], "session:sess-a",
                                     stream_update={"bogus": 1}))
         await db.rollback()
         check("failed calls left no partial rows (atomicity)",
@@ -113,8 +115,8 @@ async def main():
 
         # ── no built-in stream: "meta" is a slug like any other ──────────────
         await rejects('"meta" without create_stream -> 404 (nothing is built in)',
-                      NotFound, svc.log_event(U, "meta", "Ledger work logged", ["x"], "sess-a"))
-        out = await svc.log_event(U, "meta", "Ledger work logged", ["x"], "sess-a",
+                      NotFound, svc.log_event(U, "meta", "Ledger work logged", ["x"], "session:sess-a"))
+        out = await svc.log_event(U, "meta", "Ledger work logged", ["x"], "session:sess-a",
                                   create_stream={"title": "Ledger system"})
         check('"meta" created explicitly like any stream',
               out["stream"]["id"] == "meta")
@@ -124,7 +126,7 @@ async def main():
         a = next(r for r in rep if r["id"] == "sess-a")
         check("every event attributes — meta included (now meta)",
               a["stream_id"] == "meta", a)
-        await svc.log_event(U, "beta", "Beta shipped", ["y"], "sess-a",
+        await svc.log_event(U, "beta", "Beta shipped", ["y"], "session:sess-a",
                             create_stream={"title": "Beta"})
         a = (await svc.list(U, stream_id="beta"))
         check("most recent event wins (now beta) + ?stream_id filter",
@@ -160,29 +162,29 @@ async def main():
         check("staleness: stale at 20d", svc.staleness(row) == "stale")
 
         # Emitter is required with no exceptions (rev 19 ruling).
-        await rejects("close without session_id -> 422", LedgerError,
+        await rejects("close without actor -> 422", LedgerError,
                       svc.stream_close(U, "gamma", "done", ""))
         await rejects("close with unknown session -> 404", NotFound,
-                      svc.stream_close(U, "gamma", "done", "nope"))
+                      svc.stream_close(U, "gamma", "done", "session:nope"))
         await db.rollback()
 
         # Emitter liveness on close: end the session first, closing revives it.
         await svc.apply_event(U, "sess-a", "SessionEnd")
         n_ev = await count(db, LedgerEvent)
-        out = await svc.stream_close(U, "gamma", "work done", session_id="sess-a")
+        out = await svc.stream_close(U, "gamma", "work done", "session:sess-a")
         check("close sets closed_at + logs the closure event (one transaction)",
               out["stream"]["closed_at"] is not None
               and out["closure_event"]["stream_id"] == "gamma"
-              and out["closure_event"]["session_id"] == "sess-a"
+              and out["closure_event"]["actor"] == "session:sess-a"
               and await count(db, LedgerEvent) == n_ev + 1, out)
         s_row = (await db.execute(select(LedgerSession).where(
             LedgerSession.id == "sess-a"))).scalar_one()
         check("close writes the emitter's liveness (invariant 9)",
               s_row.status == "active", s_row.status)
         check("closed stream: staleness null", out["stream"]["staleness"] is None)
-        await rejects("re-close -> 409", Conflict, svc.stream_close(U, "gamma", "again", "sess-a"))
+        await rejects("re-close -> 409", Conflict, svc.stream_close(U, "gamma", "again", "session:sess-a"))
         await rejects("log to closed stream -> 409", Conflict,
-                      svc.log_event(U, "gamma", "late", ["x"], "sess-a"))
+                      svc.log_event(U, "gamma", "late", ["x"], "session:sess-a"))
         await db.rollback()
         await rejects("PUT closed stream -> 409", Conflict,
                       svc.stream_put(U, "gamma", {"state": "zombie"}))
@@ -219,7 +221,7 @@ async def main():
         check("index: no stream excluded — meta present, closed gamma absent",
               "Ledger system" in md and "Gamma" not in md, md)
 
-        out = await svc.stream_close(U, "meta", "ordinary streams close", "sess-a")
+        out = await svc.stream_close(U, "meta", "ordinary streams close", "session:sess-a")
         check("meta closes like any other stream",
               out["stream"]["closed_at"] is not None, out)
 
@@ -241,30 +243,30 @@ async def main():
         check("data endpoint still serves the closed stream's history",
               any(e["stream_id"] == "meta" for e in await svc.events_list(U)))
 
-        # ── the emitter is a place (invariant 11) ────────────────────────────
-        await rejects("neither session_id nor emitter -> 422", LedgerError,
+        # ── the actor (invariant 11): one prefixed identifier ────────────────
+        await rejects("missing actor -> 422", LedgerError,
                       svc.log_event(U, "alpha", "ok", ["x"]))
-        await rejects("both session_id and emitter=board -> 422", LedgerError,
-                      svc.log_event(U, "alpha", "ok", ["x"], "sess-a", emitter="board"))
-        await rejects("emitter other than board -> 422", LedgerError,
-                      svc.log_event(U, "alpha", "ok", ["x"], emitter="operator"))
-        out = await svc.log_event(U, "alpha", "Board says so", ["x"], emitter="board")
-        check("board-emitted event: kind stored, no session, session None in response",
-              out["event"]["emitter_kind"] == "board"
-              and out["event"]["session_id"] is None
-              and out["session"] is None, out)
-        check("session-emitted events carry kind=session in reads",
-              all(e["emitter_kind"] == "session"
+        await rejects("unknown actor type -> 400", UnknownActorType,
+                      svc.log_event(U, "alpha", "ok", ["x"], "integration:zapier"))
+        await rejects("bare unknown singleton -> 400", UnknownActorType,
+                      svc.log_event(U, "alpha", "ok", ["x"], "operator"))
+        await rejects("session prefix without an id -> 422", LedgerError,
+                      svc.log_event(U, "alpha", "ok", ["x"], "session:"))
+        out = await svc.log_event(U, "alpha", "Board says so", ["x"], "board")
+        check("board actor: stored on the event, no session in the response",
+              out["event"]["actor"] == "board" and out["session"] is None, out)
+        check("session actors read back prefixed; ?session_id filter stays bare",
+              all(e["actor"] == "session:sess-a"
                   for e in await svc.events_list(U, session_id="sess-a")))
 
         # ── reopen: the mirror of close ──────────────────────────────────────
         await rejects("reopen an open stream -> 409", Conflict,
-                      svc.stream_reopen(U, "alpha", "why", "sess-a"))
+                      svc.stream_reopen(U, "alpha", "why", "session:sess-a"))
         await db.rollback()
         await rejects("reopen unknown stream -> 404", NotFound,
-                      svc.stream_reopen(U, "ghost", "why", "sess-a"))
+                      svc.stream_reopen(U, "ghost", "why", "session:sess-a"))
         await db.rollback()
-        out = await svc.stream_reopen(U, "meta", "history back on the board", "sess-a")
+        out = await svc.stream_reopen(U, "meta", "history back on the board", "session:sess-a")
         check("reopen clears closed_at and logs the reopen event",
               out["stream"]["closed_at"] is None
               and "reopened" in out["reopen_event"]["headline"], out)
@@ -272,14 +274,13 @@ async def main():
         check("reopened stream brings its events back to the board",
               any(e["stream_id"] == "meta" for e in b["events"]), b["events"])
 
-        # ── board-emitted close/reopen (the dashboard buttons) ───────────────
-        out = await svc.stream_close(U, "meta", "from the dashboard", emitter="board")
-        check("board-emitted close: closure event names the board, no session",
-              out["closure_event"]["emitter_kind"] == "board"
-              and out["closure_event"]["session_id"] is None, out)
-        out = await svc.stream_reopen(U, "meta", "back again", emitter="board")
-        check("board-emitted reopen mirrors it",
-              out["reopen_event"]["emitter_kind"] == "board", out)
+        # ── board-actor close/reopen (the dashboard buttons) ─────────────────
+        out = await svc.stream_close(U, "meta", "from the dashboard", "board")
+        check("board close: closure event names the board",
+              out["closure_event"]["actor"] == "board", out)
+        out = await svc.stream_reopen(U, "meta", "back again", "board")
+        check("board reopen mirrors it",
+              out["reopen_event"]["actor"] == "board", out)
 
         # ── reset clears all three stores ────────────────────────────────────
         await svc.reset(U)

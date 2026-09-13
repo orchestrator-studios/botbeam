@@ -82,51 +82,56 @@ check("unknown signal value -> 422", r.status_code == 422, r.text)
 # ── record plane over the wire ───────────────────────────────────────────────
 r = c.post("/ledger/events", json={
     "stream_id": "alpha", "headline": "Shipped it", "body": ["done"],
-    "session_id": "s1", "create_stream": {"title": "Alpha"}})
+    "actor": "session:s1", "create_stream": {"title": "Alpha"}})
 check("POST /ledger/events -> 201 {event, session, stream}",
       r.status_code == 201 and set(r.json()) == {"event", "session", "stream"}, r.text)
 
 r = c.post("/ledger/events", json={
     "stream_id": "alpha", "headline": "With product", "body": ["x"],
-    "session_id": "s1", "product": {"name": "n", "home": "h"}})
+    "actor": "session:s1", "product": {"name": "n", "home": "h"}})
 check("product block -> 422 (deferred)", r.status_code == 422, r.text)
 
 r = c.post("/ledger/events", json={
-    "stream_id": "ghost", "headline": "No stream", "body": ["x"], "session_id": "s1"})
+    "stream_id": "ghost", "headline": "No stream", "body": ["x"], "actor": "session:s1"})
 check("unknown stream -> 404 {error:not_found}",
       r.status_code == 404 and r.json()["detail"]["error"] == "not_found", r.text)
 
 r = c.post("/ledger/streams/alpha/close", json={"reason": "done"})
-check("close without session_id -> 422 (emitter required, no exceptions)",
+check("close without actor -> 422 (the actor is required, no exceptions)",
       r.status_code == 422, r.text)
-r = c.post("/ledger/streams/alpha/close", json={"reason": "done", "session_id": "s1"})
+r = c.post("/ledger/streams/alpha/close", json={"reason": "done", "actor": "session:s1"})
 check("close -> 200 {stream, closure_event}",
       r.status_code == 200 and set(r.json()) == {"stream", "closure_event"}, r.text)
-r = c.post("/ledger/streams/alpha/close", json={"reason": "again", "session_id": "s1"})
+r = c.post("/ledger/streams/alpha/close", json={"reason": "again", "actor": "session:s1"})
 check("re-close -> 409 {error:conflict}",
       r.status_code == 409 and r.json()["detail"]["error"] == "conflict", r.text)
-r = c.post("/ledger/streams/alpha/reopen", json={"reason": "back", "session_id": "s1"})
+r = c.post("/ledger/streams/alpha/reopen", json={"reason": "back", "actor": "session:s1"})
 check("reopen -> 200 {stream, reopen_event}",
       r.status_code == 200 and set(r.json()) == {"stream", "reopen_event"}, r.text)
-r = c.post("/ledger/streams/alpha/reopen", json={"reason": "again", "session_id": "s1"})
+r = c.post("/ledger/streams/alpha/reopen", json={"reason": "again", "actor": "session:s1"})
 check("reopen an open stream -> 409 {error:conflict}",
       r.status_code == 409 and r.json()["detail"]["error"] == "conflict", r.text)
 
-# ── the emitter is a place (invariant 11) over the wire ──────────────────────
+# ── the actor (invariant 11) over the wire ───────────────────────────────────
 r = c.post("/ledger/events", json={
-    "stream_id": "alpha", "headline": "From the board", "body": ["x"], "emitter": "board"})
-check("board-emitted event -> 201, emitter_kind=board, session null",
-      r.status_code == 201 and r.json()["event"]["emitter_kind"] == "board"
-      and r.json()["event"]["session_id"] is None and r.json()["session"] is None, r.text)
+    "stream_id": "alpha", "headline": "From the board", "body": ["x"], "actor": "board"})
+check("board actor -> 201, event carries actor=board, session null",
+      r.status_code == 201 and r.json()["event"]["actor"] == "board"
+      and r.json()["session"] is None, r.text)
 r = c.post("/ledger/events", json={
-    "stream_id": "alpha", "headline": "Two places", "body": ["x"],
-    "session_id": "s1", "emitter": "board"})
-check("naming both places -> 422", r.status_code == 422, r.text)
-r = c.post("/ledger/streams/alpha/close", json={"reason": "board test", "emitter": "board"})
-check("board-emitted close -> 200, closure event names the board",
-      r.status_code == 200 and r.json()["closure_event"]["emitter_kind"] == "board", r.text)
-r = c.post("/ledger/streams/alpha/reopen", json={"reason": "board test", "emitter": "board"})
-check("board-emitted reopen -> 200", r.status_code == 200, r.text)
+    "stream_id": "alpha", "headline": "Old spelling", "body": ["x"], "session_id": "s1"})
+check("retired session_id spelling -> 422 (extra=forbid, no legacy)",
+      r.status_code == 422, r.text)
+r = c.post("/ledger/events", json={
+    "stream_id": "alpha", "headline": "New actor type", "body": ["x"],
+    "actor": "integration:zapier"})
+check("unknown actor type -> 400 {error:unknown_actor}",
+      r.status_code == 400 and r.json()["detail"]["error"] == "unknown_actor", r.text)
+r = c.post("/ledger/streams/alpha/close", json={"reason": "board test", "actor": "board"})
+check("board close -> 200, closure event names the board",
+      r.status_code == 200 and r.json()["closure_event"]["actor"] == "board", r.text)
+r = c.post("/ledger/streams/alpha/reopen", json={"reason": "board test", "actor": "board"})
+check("board reopen -> 200", r.status_code == 200, r.text)
 
 r = c.get("/ledger/index")
 check("GET /ledger/index -> text/markdown",
@@ -147,10 +152,10 @@ check("GET /ledger/search finds the event",
 # The deliverable's stream must exist first — nothing is built in.
 r = c.post("/ledger/events", json={
     "stream_id": "beta", "headline": "Beta opens", "body": ["x"],
-    "session_id": "s1", "create_stream": {"title": "Beta"}})
+    "actor": "session:s1", "create_stream": {"title": "Beta"}})
 check("stream for the wire check created explicitly", r.status_code == 201, r.text)
 r = c.post("/ledger/runs", json={
-    "session_id": "s1", "intent": "wire check",
+    "actor": "session:s1", "intent": "wire check",
     "create_deliverable": {"name": "Widget", "home": "C:\\w", "stream_id": "beta"}})
 check("POST /ledger/runs -> 201 {run, deliverable, session} with open_run join",
       r.status_code == 201 and set(r.json()) == {"run", "deliverable", "session"}
@@ -158,21 +163,21 @@ check("POST /ledger/runs -> 201 {run, deliverable, session} with open_run join",
 run_id = r.json()["run"]["id"]
 dl_id = r.json()["deliverable"]["id"]
 
-r = c.post("/ledger/runs", json={"session_id": "s1", "intent": "again", "deliverable_id": dl_id})
+r = c.post("/ledger/runs", json={"actor": "session:s1", "intent": "again", "deliverable_id": dl_id})
 check("second open -> 409", r.status_code == 409, r.text)
 
-r = c.post(f"/ledger/deliverables/{dl_id}/retire")
+r = c.post(f"/ledger/deliverables/{dl_id}/retire", json={"actor": "board"})
 check("retire with open run -> 409", r.status_code == 409, r.text)
 
 r = c.get("/ledger/runs", params={"open": "true"})
 check("GET /ledger/runs?open=true lists the open run",
       r.status_code == 200 and [x["id"] for x in r.json()["items"]] == [run_id], r.text)
 
-r = c.post(f"/ledger/runs/{run_id}/close", json={"session_id": "s1", "outcome": "closed", "state": "v1"})
+r = c.post(f"/ledger/runs/{run_id}/close", json={"actor": "session:s1", "outcome": "closed", "state": "v1"})
 check("close -> 200, deliverable advanced",
       r.status_code == 200 and r.json()["deliverable"]["state"] == "v1", r.text)
 
-r = c.post(f"/ledger/deliverables/{dl_id}/retire")
+r = c.post(f"/ledger/deliverables/{dl_id}/retire", json={"actor": "board"})
 check("retire after close -> 200 retired",
       r.status_code == 200 and r.json()["status"] == "retired", r.text)
 r = c.get("/ledger/deliverables", params={"status": "retired"})

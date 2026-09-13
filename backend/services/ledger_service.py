@@ -20,9 +20,13 @@ RECORD — events, streams, runs, and deliverables, admitted by judgment (the
 skill). Events are immutable and exist only via log_event, an atomic
 composite: append the event, write a session emitter's liveness
 (invariant 9 — logging is a sign of life; turn_state untouched), apply the
-optional stream update. Every event names its emitter, and an emitter is a
-place (invariant 11): a session, or the BotBeam board — declared by the
-caller, never inferred from the credential. Streams are field-replaced, never merged. There is no
+optional stream update. Every write that records who acted takes an ACTOR
+(invariant 11) — one prefixed identifier, not a pair of fields: the type is
+a property of the identifier itself. "session:<id>" resolves to a session
+and writes its liveness; "board" is the one BotBeam interface per user —
+its own identity, no id, no liveness row. Declared by the caller, never
+inferred from the credential. Admitting a new actor type is a line in
+ACTOR_SINGLETONS or a new prefix branch, never a migration. Streams are field-replaced, never merged. There is no
 built-in stream and no slug the code knows by name — work on the ledger
 itself is a stream like any other, or it is not logged.
 
@@ -66,6 +70,17 @@ logger = logging.getLogger("botbeam.ledger")
 SIGNALS = {"SessionStart", "UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"}
 
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
+
+# Recognised actor types (invariant 11). "session:<id>" is the prefixed kind;
+# singletons carry no id because there is exactly one per user. Admitting a
+# new actor type is a line here, not a migration.
+ACTOR_SESSION = "session"
+ACTOR_SINGLETONS = {"board"}
+
+
+class UnknownActorType(ValueError):
+    """An actor whose type the code does not recognise — 400, not 422: the
+    request parses, the type just isn't admitted (yet)."""
 
 
 class LedgerError(ValueError):
@@ -205,31 +220,43 @@ class LedgerService:
             "stream_id": e.stream_id,
             "headline": e.headline,
             "body": e.body or [],
-            "emitter_kind": e.emitter_kind,
-            "session_id": e.session_id,
+            "actor": e.actor,
         }
 
-    # ── the emitter is a place (invariant 11) ────────────────────────────────
+    # ── the actor (invariant 11) ─────────────────────────────────────────────
 
     @staticmethod
-    def _resolve_emitter(session_id: Optional[str], emitter: Optional[str]) -> str:
-        """Exactly one place is named, explicitly — a session_id, or
-        emitter="board". Never inferred from the credential: the browser and
-        every agent authenticate as the same user, so inference is a guess.
-        Returns the emitter_kind to store."""
-        if emitter not in (None, "board"):
-            raise LedgerError('emitter must be "board" when given')
-        if emitter == "board" and session_id:
-            raise LedgerError('session_id and emitter="board" are mutually exclusive — name one place')
-        if emitter != "board" and not session_id:
-            raise LedgerError('an emitter is required: session_id, or emitter="board"')
-        return "board" if emitter == "board" else "session"
+    def _parse_actor(actor: Optional[str]) -> tuple[str, Optional[str]]:
+        """One prefixed identifier — parse on the first ':'. No colon means
+        the type has exactly one instance and is its own identity. Returns
+        (type, id-or-None); unrecognised types are 400 (UnknownActorType),
+        an unparseable or missing actor is 422 (LedgerError)."""
+        if not actor or not isinstance(actor, str) or not actor.strip():
+            raise LedgerError('actor is required — "session:<id>", or "board"')
+        actor = actor.strip()
+        if ":" in actor:
+            kind, _, ident = actor.partition(":")
+            if kind == ACTOR_SESSION:
+                if not ident:
+                    raise LedgerError('session actor needs an id — "session:<id>"')
+                return ACTOR_SESSION, ident
+            raise UnknownActorType(f'Unknown actor type "{kind}"')
+        if actor in ACTOR_SINGLETONS:
+            return actor, None
+        raise UnknownActorType(f'Unknown actor "{actor}"')
 
-    async def _emitting_session(self, user_id: int, session_id: str) -> LedgerSession:
-        s = await self.db.get(LedgerSession, session_id)
-        if s is None or s.user_id != user_id:
-            raise NotFound(f'Unknown session "{session_id}"')
-        return s
+    async def _resolve_actor(self, user_id: int, actor: Optional[str]
+                             ) -> tuple[str, Optional[LedgerSession]]:
+        """(canonical actor string, session row or None). A session actor
+        must resolve to one of this user's sessions; singleton actors resolve
+        to themselves with nothing to look up."""
+        kind, ident = self._parse_actor(actor)
+        if kind == ACTOR_SESSION:
+            s = await self.db.get(LedgerSession, ident)
+            if s is None or s.user_id != user_id:
+                raise NotFound(f'Unknown session "{ident}"')
+            return f"{ACTOR_SESSION}:{ident}", s
+        return kind, None
 
     # ── signals (telemetry plane) ────────────────────────────────────────────
 
@@ -347,17 +374,16 @@ class LedgerService:
     async def log_event(
         self, user_id: int,
         stream_id: str, headline: str, body: list[str],
-        session_id: Optional[str] = None,
+        actor: Optional[str] = None,
         stream_update: Optional[dict] = None,
         create_stream: Optional[dict] = None,
-        emitter: Optional[str] = None,
     ) -> dict:
         """POST /ledger/events — one atomic transaction, three parts: append
-        the immutable event; for a session emitter, write its liveness
-        (invariant 9 — turn_state untouched; the board is a surface with no
-        liveness row); apply the stream update / creation. All validation
-        precedes every write, and one commit lands the composite — it commits
-        entirely or not at all.
+        the immutable event; for a session actor, write its liveness
+        (invariant 9 — turn_state untouched; other actors have no liveness
+        row); apply the stream update / creation. All validation precedes
+        every write, and one commit lands the composite — it commits entirely
+        or not at all.
         """
         now = datetime.utcnow()
 
@@ -369,13 +395,11 @@ class LedgerService:
         if not isinstance(body, list) or not (1 <= len(body) <= 4) \
                 or not all(isinstance(b, str) and b.strip() for b in body):
             raise LedgerError("body must be 1-4 non-empty markdown strings")
-        kind = self._resolve_emitter(session_id, emitter)
+        canonical, s = await self._resolve_actor(user_id, actor)
         if not SLUG_RE.match(stream_id or ""):
             raise LedgerError("stream_id must be a slug ([a-z0-9-]+)")
         if stream_update:
             self._check_stream_fields(stream_update)
-
-        s = await self._emitting_session(user_id, session_id) if kind == "session" else None
 
         st = await self._get_stream(user_id, stream_id)
         if st is None:
@@ -395,7 +419,7 @@ class LedgerService:
         ev = LedgerEvent(
             id=f"ev_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
             stream_id=stream_id, headline=headline.strip(), body=body,
-            emitter_kind=kind, session_id=session_id,
+            actor=canonical,
         )
         self.db.add(ev)
 
@@ -410,8 +434,8 @@ class LedgerService:
         if s is not None:
             await self.db.refresh(s)
         await self.db.refresh(st)
-        logger.info("ledger event logged (stream=%s, emitter=%s, user=%s)",
-                    stream_id, session_id[:6] if session_id else "board", user_id)
+        logger.info("ledger event logged (stream=%s, actor=%s, user=%s)",
+                    stream_id, canonical[:14], user_id)
         return {
             "event": self._event_repr(ev),
             "session": await self._repr_one(user_id, s, now) if s is not None else None,
@@ -427,7 +451,9 @@ class LedgerService:
         if stream_id:
             q = q.where(LedgerEvent.stream_id == stream_id)
         if session_id:
-            q = q.where(LedgerEvent.session_id == session_id)
+            # The filter stays a bare uuid — the parameter name already
+            # declared the type (invariant 11 ruling).
+            q = q.where(LedgerEvent.actor == f"{ACTOR_SESSION}:{session_id}")
         if since:
             q = q.where(LedgerEvent.at >= since)
         q = q.order_by(LedgerEvent.at.desc(), LedgerEvent.id.desc()).limit(limit)
@@ -454,40 +480,37 @@ class LedgerService:
         return self._stream_repr(st, now)
 
     async def stream_close(self, user_id: int, sid: str, reason: str,
-                           session_id: Optional[str] = None,
-                           emitter: Optional[str] = None) -> dict:
+                           actor: Optional[str] = None) -> dict:
         """Close a stream and log the closure event — one transaction. The
-        emitter is required with no exceptions: closure events are events,
-        and every event names its place (invariant 11) — a session (whose
+        actor is required with no exceptions: closure events are events, and
+        every event names who acted (invariant 11) — a session (whose
         liveness is written, invariant 9) or the board."""
         st = await self._get_stream(user_id, sid)
         if st is None:
             raise NotFound(f'Unknown stream "{sid}"')
         if st.closed_at is not None:
             raise Conflict(f'Stream "{sid}" is already closed')
-        kind = self._resolve_emitter(session_id, emitter)
-        s = await self._emitting_session(user_id, session_id) if kind == "session" else None
+        canonical, s = await self._resolve_actor(user_id, actor)
         now = datetime.utcnow()
         st.closed_at = now
         st.updated = now
         ev = LedgerEvent(
             id=f"ev_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
             stream_id=sid, headline=f'Stream "{sid}" closed — {reason or "done"}',
-            body=[reason or "closed"], emitter_kind=kind, session_id=session_id,
+            body=[reason or "closed"], actor=canonical,
         )
         self.db.add(ev)
         if s is not None:
             self._liveness(s, now)
         await self.db.commit()
         await self.db.refresh(st)
-        logger.info("ledger stream closed (%s, by=%s, user=%s)", sid, kind, user_id)
+        logger.info("ledger stream closed (%s, actor=%s, user=%s)", sid, canonical[:14], user_id)
         return {"stream": self._stream_repr(st, now), "closure_event": self._event_repr(ev)}
 
     async def stream_reopen(self, user_id: int, sid: str, reason: str,
-                            session_id: Optional[str] = None,
-                            emitter: Optional[str] = None) -> dict:
+                            actor: Optional[str] = None) -> dict:
         """Reopen a closed stream and log the reopen event — one transaction,
-        the mirror of stream_close, same emitter rule (invariant 11). The
+        the mirror of stream_close, same actor rule (invariant 11). The
         record keeps both the closure and the reopen; nothing is erased. The
         stream returns to the board and brings its events and deliverables
         back with it (the board invariant does that for free)."""
@@ -496,22 +519,21 @@ class LedgerService:
             raise NotFound(f'Unknown stream "{sid}"')
         if st.closed_at is None:
             raise Conflict(f'Stream "{sid}" is not closed')
-        kind = self._resolve_emitter(session_id, emitter)
-        s = await self._emitting_session(user_id, session_id) if kind == "session" else None
+        canonical, s = await self._resolve_actor(user_id, actor)
         now = datetime.utcnow()
         st.closed_at = None
         st.updated = now
         ev = LedgerEvent(
             id=f"ev_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
             stream_id=sid, headline=f'Stream "{sid}" reopened — {reason or "back on the board"}',
-            body=[reason or "reopened"], emitter_kind=kind, session_id=session_id,
+            body=[reason or "reopened"], actor=canonical,
         )
         self.db.add(ev)
         if s is not None:
             self._liveness(s, now)
         await self.db.commit()
         await self.db.refresh(st)
-        logger.info("ledger stream reopened (%s, by=%s, user=%s)", sid, kind, user_id)
+        logger.info("ledger stream reopened (%s, actor=%s, user=%s)", sid, canonical[:14], user_id)
         return {"stream": self._stream_repr(st, now), "reopen_event": self._event_repr(ev)}
 
     async def streams_list(self, user_id: int, status: str = "active") -> list[dict]:
@@ -529,24 +551,25 @@ class LedgerService:
     # ── record plane: runs + deliverables (rev 21) ───────────────────────────
 
     async def run_open(
-        self, user_id: int, session_id: str, intent: str,
+        self, user_id: int, actor: str, intent: str,
         deliverable_id: Optional[str] = None,
         create_deliverable: Optional[dict] = None,
     ) -> dict:
         """POST /ledger/runs — the only way a run (or a deliverable) comes
         into existence. Atomic: run + optional deliverable mint + the opening
-        session's liveness (invariant 9 extends; turn_state untouched)."""
+        session's liveness (invariant 9 extends; turn_state untouched). The
+        opener must be a session actor: a run is a stretch of WORK, and the
+        board doesn't do the work — it watches it."""
         now = datetime.utcnow()
         if not intent or not intent.strip():
             raise LedgerError("intent is required — what this work IS, not how big it is")
-        if not session_id:
-            raise LedgerError("session_id is required")
         if bool(deliverable_id) == bool(create_deliverable):
             raise LedgerError("pass exactly one of deliverable_id or create_deliverable")
 
-        s = await self.db.get(LedgerSession, session_id)
-        if s is None or s.user_id != user_id:
-            raise NotFound(f'Unknown session "{session_id}"')
+        canonical, s = await self._resolve_actor(user_id, actor)
+        if s is None:
+            raise LedgerError(f'a run is opened by a session — "{canonical}" does not do the work')
+        session_id = s.id
 
         # One open run per session — forces an honest close-or-abandon at the
         # boundary. Recovery after a crash: list your open runs, abandon the
@@ -595,13 +618,14 @@ class LedgerService:
         }
 
     async def run_close(
-        self, user_id: int, run_id: str, session_id: str,
+        self, user_id: int, run_id: str, actor: str,
         outcome: str, state: Optional[str] = None,
     ) -> dict:
         """POST /ledger/runs/{id}/close — the only way a run ends. The closer
         may differ from the opener (ruling: that IS the manual cleanup path
-        for crash-leaked runs). closed advances the deliverable; abandoned
-        leaves it untouched."""
+        for crash-leaked runs), and the board may close — sweeping a leaked
+        run off a card is exactly a dashboard act. closed advances the
+        deliverable; abandoned leaves it untouched."""
         run = await self.db.get(LedgerRun, run_id)
         if run is None or run.user_id != user_id:
             raise NotFound(f'Unknown run "{run_id}"')
@@ -613,11 +637,7 @@ class LedgerService:
             raise LedgerError("state is required on closed — the closer must consider it (resubmitting it verbatim is legitimate)")
         if outcome == "abandoned" and state is not None:
             raise LedgerError("state is refused on abandoned — the deliverable is untouched")
-        if not session_id:
-            raise LedgerError("session_id is required — the closer, for liveness")
-        s = await self.db.get(LedgerSession, session_id)
-        if s is None or s.user_id != user_id:
-            raise NotFound(f'Unknown session "{session_id}"')
+        canonical, s = await self._resolve_actor(user_id, actor)
 
         now = datetime.utcnow()
         run.ended_at = now
@@ -627,18 +647,23 @@ class LedgerService:
             d.state = state.strip()
             d.last_run_id = run.id
             d.updated = now
-        self._liveness(s, now)
+        if s is not None:
+            self._liveness(s, now)
         await self.db.commit()
-        logger.info("ledger run %s (%s, user=%s)", outcome, run_id, user_id)
+        logger.info("ledger run %s (%s, actor=%s, user=%s)", outcome, run_id, canonical[:14], user_id)
         return {
             "run": self._run_repr(run, now),
             "deliverable": self._deliverable_repr(d),
-            "session": await self._repr_one(user_id, s, now),
+            "session": await self._repr_one(user_id, s, now) if s is not None else None,
         }
 
-    async def deliverable_set_status(self, user_id: int, dl_id: str, retired: bool) -> dict:
+    async def deliverable_set_status(self, user_id: int, dl_id: str, retired: bool,
+                                     actor: Optional[str] = None) -> dict:
         """retire / unretire — the USER'S call, never Claude's (rev 21 ruling:
-        a run ending says nothing about whether the thing is finished with)."""
+        a run ending says nothing about whether the thing is finished with).
+        The actor (invariant 11) names who acted — a session writes liveness,
+        the board is Cliff's button."""
+        canonical, s = await self._resolve_actor(user_id, actor)
         d = await self.db.get(LedgerDeliverable, dl_id)
         if d is None or d.user_id != user_id:
             raise NotFound(f'Unknown deliverable "{dl_id}"')
@@ -651,10 +676,13 @@ class LedgerService:
             if open_run is not None:
                 raise Conflict(f'Deliverable has an open run ({open_run.id}) — close it first')
         d.status = "retired" if retired else "live"
-        d.updated = datetime.utcnow()
+        now = datetime.utcnow()
+        d.updated = now
+        if s is not None:
+            self._liveness(s, now)
         await self.db.commit()
-        logger.info("ledger deliverable %s (%s, user=%s)",
-                    "retired" if retired else "unretired", dl_id, user_id)
+        logger.info("ledger deliverable %s (%s, actor=%s, user=%s)",
+                    "retired" if retired else "unretired", dl_id, canonical[:14], user_id)
         return self._deliverable_repr(d)
 
     async def runs_list(
@@ -748,13 +776,14 @@ class LedgerService:
         if not ids:
             return {}
         evq = (
-            select(LedgerEvent.session_id, LedgerEvent.stream_id)
+            select(LedgerEvent.actor, LedgerEvent.stream_id)
             .where(LedgerEvent.user_id == user_id,
-                   LedgerEvent.session_id.in_(ids))
+                   LedgerEvent.actor.in_([f"{ACTOR_SESSION}:{i}" for i in ids]))
             .order_by(LedgerEvent.at.desc(), LedgerEvent.id.desc())
         )
         out: dict = {}
-        for sid, stream_id in (await self.db.execute(evq)).all():
+        for actor, stream_id in (await self.db.execute(evq)).all():
+            sid = actor.partition(":")[2]
             if sid not in out:
                 out[sid] = stream_id
         remaining = [s for s in rows if s.id not in out and s.workspace_id]

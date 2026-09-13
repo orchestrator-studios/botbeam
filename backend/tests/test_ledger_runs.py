@@ -53,7 +53,7 @@ async def main():
 
         # ── open: mint the deliverable in the same call ──────────────────────
         out = await svc.run_open(
-            U, "sess-a", "cutting rev 21",
+            U, "session:sess-a", "cutting rev 21",
             create_deliverable={"name": "The Ledger Book", "home": "C:\\code\\woodshed\\docs\\ledger\\ledger-reference.html", "stream_id": "meta"})
         run1, dl = out["run"], out["deliverable"]
         check("open mints run + deliverable, 3-part response",
@@ -74,42 +74,42 @@ async def main():
 
         # ── one open run per session ─────────────────────────────────────────
         await rejects("second open on the same session -> 409", Conflict,
-                      svc.run_open(U, "sess-a", "something else", deliverable_id=dl["id"]))
+                      svc.run_open(U, "session:sess-a", "something else", deliverable_id=dl["id"]))
         await db.rollback()
 
         # ── open validations ─────────────────────────────────────────────────
         await rejects("missing intent -> 422", LedgerError,
-                      svc.run_open(U, "sess-b", "  ", deliverable_id=dl["id"]))
+                      svc.run_open(U, "session:sess-b", "  ", deliverable_id=dl["id"]))
         await rejects("neither deliverable_id nor create_deliverable -> 422", LedgerError,
-                      svc.run_open(U, "sess-b", "work"))
+                      svc.run_open(U, "session:sess-b", "work"))
         await rejects("both deliverable_id and create_deliverable -> 422", LedgerError,
-                      svc.run_open(U, "sess-b", "work", deliverable_id=dl["id"],
+                      svc.run_open(U, "session:sess-b", "work", deliverable_id=dl["id"],
                                    create_deliverable={"name": "x", "home": "h", "stream_id": "meta"}))
         await rejects("create_deliverable missing home -> 422", LedgerError,
-                      svc.run_open(U, "sess-b", "work",
+                      svc.run_open(U, "session:sess-b", "work",
                                    create_deliverable={"name": "x", "stream_id": "meta"}))
         await rejects("unknown deliverable_id -> 404", NotFound,
-                      svc.run_open(U, "sess-b", "work", deliverable_id="dl_nope"))
+                      svc.run_open(U, "session:sess-b", "work", deliverable_id="dl_nope"))
         await rejects("unknown stream in create_deliverable -> 404 (no nested create)", NotFound,
-                      svc.run_open(U, "sess-b", "work",
+                      svc.run_open(U, "session:sess-b", "work",
                                    create_deliverable={"name": "x", "home": "h", "stream_id": "ghost"}))
         await rejects("unknown session -> 404", NotFound,
-                      svc.run_open(U, "nope", "work", deliverable_id=dl["id"]))
+                      svc.run_open(U, "session:nope", "work", deliverable_id=dl["id"]))
         await db.rollback()
 
         # ── close: state rules, deliverable advance, non-opener close ────────
         await rejects("close missing state on closed -> 422", LedgerError,
-                      svc.run_close(U, run1["id"], "sess-a", "closed"))
+                      svc.run_close(U, run1["id"], "session:sess-a", "closed"))
         await rejects("close with state on abandoned -> 422", LedgerError,
-                      svc.run_close(U, run1["id"], "sess-a", "abandoned", state="rev 21"))
+                      svc.run_close(U, run1["id"], "session:sess-a", "abandoned", state="rev 21"))
         await rejects("bad outcome -> 422", LedgerError,
-                      svc.run_close(U, run1["id"], "sess-a", "finished", state="x"))
+                      svc.run_close(U, run1["id"], "session:sess-a", "finished", state="x"))
         await db.rollback()
 
         # Non-opener close is ALLOWED (the crash-leak cleanup path) and writes
         # the CLOSER's liveness.
         await svc.apply_event(U, "sess-b", "SessionEnd")
-        out = await svc.run_close(U, run1["id"], "sess-b", "closed", state="rev 21")
+        out = await svc.run_close(U, run1["id"], "session:sess-b", "closed", state="rev 21")
         check("closed: run ended, deliverable advanced (state, last_run_id, updated)",
               out["run"]["outcome"] == "closed" and out["run"]["ended_at"]
               and out["deliverable"]["state"] == "rev 21"
@@ -117,43 +117,48 @@ async def main():
         check("non-opener close allowed; closer's liveness written",
               out["session"]["id"] == "sess-b" and out["session"]["status"] == "active", out["session"])
         await rejects("re-close -> 409", Conflict,
-                      svc.run_close(U, run1["id"], "sess-a", "abandoned"))
+                      svc.run_close(U, run1["id"], "session:sess-a", "abandoned"))
         await db.rollback()
 
         # ── abandoned leaves the deliverable untouched ───────────────────────
-        out = await svc.run_open(U, "sess-a", "a dead end", deliverable_id=dl["id"])
+        out = await svc.run_open(U, "session:sess-a", "a dead end", deliverable_id=dl["id"])
         run2 = out["run"]
-        out = await svc.run_close(U, run2["id"], "sess-a", "abandoned")
+        out = await svc.run_close(U, run2["id"], "session:sess-a", "abandoned")
         check("abandoned: run ended, deliverable untouched",
               out["run"]["outcome"] == "abandoned"
               and out["deliverable"]["state"] == "rev 21"
               and out["deliverable"]["last_run_id"] == run1["id"], out)
 
+        # A board actor cannot open a run — the board doesn't do the work.
+        await rejects("board actor on run open -> 422", LedgerError,
+                      svc.run_open(U, "board", "work", deliverable_id=dl["id"]))
+        await db.rollback()
+
         # ── retire / unretire — the user's call ──────────────────────────────
-        out = await svc.run_open(U, "sess-a", "more work", deliverable_id=dl["id"])
+        out = await svc.run_open(U, "session:sess-a", "more work", deliverable_id=dl["id"])
         run3 = out["run"]
         await rejects("retire with an open run -> 409", Conflict,
-                      svc.deliverable_set_status(U, dl["id"], retired=True))
+                      svc.deliverable_set_status(U, dl["id"], retired=True, actor="session:sess-a"))
         await db.rollback()
-        await svc.run_close(U, run3["id"], "sess-a", "closed", state="rev 21 final")
-        d = await svc.deliverable_set_status(U, dl["id"], retired=True)
+        await svc.run_close(U, run3["id"], "session:sess-a", "closed", state="rev 21 final")
+        d = await svc.deliverable_set_status(U, dl["id"], retired=True, actor="session:sess-a")
         check("retire after close -> retired", d["status"] == "retired", d)
         await rejects("open on a retired deliverable -> 409", Conflict,
-                      svc.run_open(U, "sess-a", "necromancy", deliverable_id=dl["id"]))
+                      svc.run_open(U, "session:sess-a", "necromancy", deliverable_id=dl["id"]))
         await db.rollback()
-        d = await svc.deliverable_set_status(U, dl["id"], retired=False)
+        d = await svc.deliverable_set_status(U, dl["id"], retired=False, actor="board")
         check("unretire -> live again", d["status"] == "live", d)
 
         # ── recovery recipe: leaked run -> list open -> abandon -> open new ──
-        out = await svc.run_open(U, "sess-b", "will crash", deliverable_id=dl["id"])
+        out = await svc.run_open(U, "session:sess-b", "will crash", deliverable_id=dl["id"])
         leaked = out["run"]["id"]
         open_runs = await svc.runs_list(U, open_only=True, session_id="sess-b")
         check("runs?open=true&session_id finds the leaked run",
               [r["id"] for r in open_runs] == [leaked], open_runs)
-        await svc.run_close(U, leaked, "sess-b", "abandoned")
-        out = await svc.run_open(U, "sess-b", "fresh start", deliverable_id=dl["id"])
+        await svc.run_close(U, leaked, "session:sess-b", "abandoned")
+        out = await svc.run_open(U, "session:sess-b", "fresh start", deliverable_id=dl["id"])
         check("after abandoning the leak, a new run opens", out["run"]["ended_at"] is None)
-        await svc.run_close(U, out["run"]["id"], "sess-b", "abandoned")
+        await svc.run_close(U, out["run"]["id"], "session:sess-b", "abandoned")
 
         # ── lists ────────────────────────────────────────────────────────────
         allruns = await svc.runs_list(U)
@@ -171,7 +176,7 @@ async def main():
         hits = await svc.search(U, "ledger book")
         check("search finds the deliverable by name",
               any(h["kind"] == "deliverable" and h["score"] == 1.0 for h in hits), hits)
-        await svc.run_open(U, "sess-a", "board check", deliverable_id=dl["id"])
+        await svc.run_open(U, "session:sess-a", "board check", deliverable_id=dl["id"])
         board = await svc.board(U)
         a = next(r for r in board["sessions"] if r["id"] == "sess-a")
         check("board session carries open_run (the bolt is a join)",
@@ -180,8 +185,8 @@ async def main():
               any(x["id"] == dl["id"] for x in board["deliverables"]), board["deliverables"])
 
         # ── the board invariant: a closed stream takes its things with it ────
-        await svc.run_close(U, a["open_run"]["id"], "sess-a", "abandoned")
-        await svc.stream_close(U, "meta", "board invariant check", "sess-a")
+        await svc.run_close(U, a["open_run"]["id"], "session:sess-a", "abandoned")
+        await svc.stream_close(U, "meta", "board invariant check", "session:sess-a")
         board = await svc.board(U)
         check("closed stream takes its deliverables and events off the board",
               all(x["stream_id"] != "meta" for x in board["deliverables"])

@@ -47,7 +47,7 @@ from config.settings import settings
 from database import get_async_db
 from services.auth_service import get_current_user
 from services.ledger_service import (
-    LedgerService, LedgerError, NotFound, Conflict,
+    LedgerService, LedgerError, NotFound, Conflict, UnknownActorType,
 )
 from websocket import manager
 
@@ -88,14 +88,13 @@ class StreamUpdate(BaseModel):
 
 class LogEvent(BaseModel):
     """POST /ledger/events body. extra='forbid' also rejects the deferred
-    `product` block with a 422, per the Book. The emitter is a place
-    (invariant 11): session_id, or emitter="board" — exactly one."""
+    `product` block — and the retired session_id spelling — with a 422.
+    The actor (invariant 11): "session:<id>" or "board", one field."""
     model_config = ConfigDict(extra="forbid")
     stream_id: str
     headline: str
     body: list[str]
-    session_id: Optional[str] = None
-    emitter: Optional[str] = None
+    actor: str
     stream_update: Optional[StreamUpdate] = None
     create_stream: Optional[CreateStream] = None
 
@@ -108,9 +107,10 @@ class CreateDeliverable(BaseModel):
 
 
 class RunOpen(BaseModel):
-    """POST /ledger/runs body — exactly one of deliverable_id / create_deliverable."""
+    """POST /ledger/runs body — exactly one of deliverable_id / create_deliverable.
+    The opener must be a session actor: the board doesn't do the work."""
     model_config = ConfigDict(extra="forbid")
-    session_id: str
+    actor: str
     intent: str
     deliverable_id: Optional[str] = None
     create_deliverable: Optional[CreateDeliverable] = None
@@ -118,25 +118,29 @@ class RunOpen(BaseModel):
 
 class RunClose(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    session_id: str
+    actor: str
     outcome: str
     state: Optional[str] = None
 
 
 class StreamClose(BaseModel):
-    """The closure event is an event, and every event names its place
-    (invariant 11): session_id, or emitter="board" — exactly one."""
+    """The closure event is an event, and every event names its actor
+    (invariant 11): "session:<id>" or "board", one field."""
     model_config = ConfigDict(extra="forbid")
     reason: str = ""
-    session_id: Optional[str] = None
-    emitter: Optional[str] = None
+    actor: str
 
 
 class StreamReopen(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: str = ""
-    session_id: Optional[str] = None
-    emitter: Optional[str] = None
+    actor: str
+
+
+class ActorBody(BaseModel):
+    """retire / unretire body — who acted (invariant 11)."""
+    model_config = ConfigDict(extra="forbid")
+    actor: str
 
 
 def _svc(db: AsyncSession) -> LedgerService:
@@ -153,6 +157,9 @@ def _http(e: ValueError) -> HTTPException:
         return HTTPException(status_code=409, detail={"error": "conflict", "reason": str(e)})
     if isinstance(e, NotFound):
         return HTTPException(status_code=404, detail={"error": "not_found", "reason": str(e)})
+    if isinstance(e, UnknownActorType):
+        # 400, not 422: the request parses, the actor type just isn't admitted.
+        return HTTPException(status_code=400, detail={"error": "unknown_actor", "reason": str(e)})
     return HTTPException(status_code=422, detail={"error": "validation", "reason": str(e)})
 
 
@@ -167,7 +174,7 @@ async def log_event(
         out = await _svc(db).log_event(
             user.user_id,
             stream_id=body.stream_id, headline=body.headline, body=body.body,
-            session_id=body.session_id, emitter=body.emitter,
+            actor=body.actor,
             stream_update=body.stream_update.model_dump(exclude_unset=True) if body.stream_update else None,
             create_stream=body.create_stream.model_dump(exclude_unset=True) if body.create_stream else None,
         )
@@ -211,8 +218,7 @@ async def close_stream(
 ):
     try:
         out = await _svc(db).stream_close(
-            user.user_id, sid, body.reason,
-            session_id=body.session_id, emitter=body.emitter)
+            user.user_id, sid, body.reason, actor=body.actor)
     except ValueError as e:
         await db.rollback()
         raise _http(e)
@@ -227,8 +233,7 @@ async def reopen_stream(
 ):
     try:
         out = await _svc(db).stream_reopen(
-            user.user_id, sid, body.reason,
-            session_id=body.session_id, emitter=body.emitter)
+            user.user_id, sid, body.reason, actor=body.actor)
     except ValueError as e:
         await db.rollback()
         raise _http(e)
@@ -243,7 +248,7 @@ async def open_run(
 ):
     try:
         out = await _svc(db).run_open(
-            user.user_id, session_id=body.session_id, intent=body.intent,
+            user.user_id, actor=body.actor, intent=body.intent,
             deliverable_id=body.deliverable_id,
             create_deliverable=body.create_deliverable.model_dump() if body.create_deliverable else None,
         )
@@ -261,7 +266,7 @@ async def close_run(
 ):
     try:
         out = await _svc(db).run_close(
-            user.user_id, rid, session_id=body.session_id,
+            user.user_id, rid, actor=body.actor,
             outcome=body.outcome, state=body.state)
     except ValueError as e:
         await db.rollback()
@@ -294,10 +299,11 @@ async def list_deliverables(
 
 @router.post("/deliverables/{did}/retire")
 async def retire_deliverable(
-    did: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+    did: str, body: ActorBody,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        rep = await _svc(db).deliverable_set_status(user.user_id, did, retired=True)
+        rep = await _svc(db).deliverable_set_status(user.user_id, did, retired=True, actor=body.actor)
     except ValueError as e:
         await db.rollback()
         raise _http(e)
@@ -307,10 +313,11 @@ async def retire_deliverable(
 
 @router.post("/deliverables/{did}/unretire")
 async def unretire_deliverable(
-    did: str, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+    did: str, body: ActorBody,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        rep = await _svc(db).deliverable_set_status(user.user_id, did, retired=False)
+        rep = await _svc(db).deliverable_set_status(user.user_id, did, retired=False, actor=body.actor)
     except ValueError as e:
         await db.rollback()
         raise _http(e)

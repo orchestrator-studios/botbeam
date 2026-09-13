@@ -2,8 +2,8 @@ from datetime import datetime
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
-    CheckConstraint, Column, Integer, String, Boolean, DateTime, Enum,
-    ForeignKey, Text, UniqueConstraint, JSON,
+    Column, Integer, String, Boolean, DateTime, Enum, ForeignKey, Text,
+    UniqueConstraint, JSON,
 )
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import declarative_base
@@ -173,22 +173,16 @@ class LedgerEvent(Base):
 
     Created only by POST /ledger/events (and stream close/reopen, which log
     their own). Never updated, never deleted. Carries exactly one stream (the
-    slug, scoped to the same owner) and exactly one emitter — and an emitter
-    is a PLACE (invariant 11): a session, or the BotBeam board. Session
-    emission is a sign of life: the same transaction writes the emitter's
-    liveness (invariant 9); the board is a surface, not a running thing, so
-    board emission skips that and only that.
+    slug, scoped to the same owner) and exactly one ACTOR (invariant 11) — a
+    prefixed identifier whose type is a property of the identifier itself:
+    "session:<id>", or "board" (no id: one BotBeam interface per user, its
+    own identity). Session actors write liveness in the same transaction
+    (invariant 9); other actors have no liveness row. Not a foreign key —
+    the recognised types live in the service, and admitting a new one is a
+    line of code, not a migration.
     """
     __tablename__ = "ledger_events"
-    __table_args__ = (
-        # The place is enforced, not preferred: a session emitter names its
-        # session, a board emitter names none. Both or neither never lands.
-        CheckConstraint(
-            "(emitter_kind = 'session' AND session_id IS NOT NULL)"
-            " OR (emitter_kind = 'board' AND session_id IS NULL)",
-            name="ck_ledger_events_emitter_place"),
-        _UTF8MB4,
-    )
+    __table_args__ = _UTF8MB4
 
     id = Column(String(24), primary_key=True)                # "ev_" + hex, server-generated
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), index=True, nullable=False)
@@ -196,11 +190,7 @@ class LedgerEvent(Base):
     stream_id = Column(String(64), nullable=False, index=True)  # owning stream's slug (per-owner scope)
     headline = Column(String(500), nullable=False)           # one line, past tense
     body = Column(JSON, nullable=False)                      # 1–4 markdown strings
-    # Invariant 11: 'session' | 'board' — a stored fact, never inferred from
-    # the credential (browser and agents authenticate as the same user), and
-    # never encoded as a missing value.
-    emitter_kind = Column(String(16), nullable=False, default="session")
-    session_id = Column(String(36), ForeignKey("ledger_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    actor = Column(String(64), nullable=False, index=True)   # "session:<id>" | "board"
 
 
 class LedgerDeliverable(Base):
