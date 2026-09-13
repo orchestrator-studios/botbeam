@@ -122,9 +122,14 @@ check("GET /ledger/search finds the event",
       r.status_code == 200 and any(h["kind"] == "event" for h in r.json()["items"]), r.text)
 
 # ── runs + deliverables over the wire (rev 21) ───────────────────────────────
+# The deliverable's stream must exist first — nothing is built in.
+r = c.post("/ledger/events", json={
+    "stream_id": "beta", "headline": "Beta opens", "body": ["x"],
+    "session_id": "s1", "create_stream": {"title": "Beta"}})
+check("stream for the wire check created explicitly", r.status_code == 201, r.text)
 r = c.post("/ledger/runs", json={
     "session_id": "s1", "intent": "wire check",
-    "create_deliverable": {"name": "Widget", "home": "C:\\w", "stream_id": "meta"}})
+    "create_deliverable": {"name": "Widget", "home": "C:\\w", "stream_id": "beta"}})
 check("POST /ledger/runs -> 201 {run, deliverable, session} with open_run join",
       r.status_code == 201 and set(r.json()) == {"run", "deliverable", "session"}
       and r.json()["session"]["open_run"]["intent"] == "wire check", r.text)

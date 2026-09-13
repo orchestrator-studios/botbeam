@@ -3,7 +3,7 @@
 Drives the real service against in-memory SQLite (aiosqlite, test-only dep):
 the atomic log_event composite (event + emitter liveness + stream update),
 every validation rejection, create_stream, stream PUT/close semantics,
-staleness, attribution (including the meta exception, invariant 6), search,
+staleness, attribution (invariant 6), search,
 the orientation index, the board payload, and reset across all three stores.
 Run directly: venv/Scripts/python tests/test_ledger_record.py
 """
@@ -111,21 +111,23 @@ async def main():
         check("failed calls left no partial rows (atomicity)",
               await count(db, LedgerEvent) == n_ev)
 
-        # ── meta: built-in, lazily created, never closes ─────────────────────
-        out = await svc.log_event(U, "meta", "Ledger work logged", ["x"], "sess-a")
-        check("meta stream auto-created on first reference",
+        # ── no built-in stream: "meta" is a slug like any other ──────────────
+        await rejects('"meta" without create_stream -> 404 (nothing is built in)',
+                      NotFound, svc.log_event(U, "meta", "Ledger work logged", ["x"], "sess-a"))
+        out = await svc.log_event(U, "meta", "Ledger work logged", ["x"], "sess-a",
+                                  create_stream={"title": "Ledger system"})
+        check('"meta" created explicitly like any stream',
               out["stream"]["id"] == "meta")
-        await rejects("closing meta -> 409", Conflict, svc.stream_close(U, "meta", "no", "sess-a"))
 
         # ── attribution rule (invariant 6) ───────────────────────────────────
         rep = await svc.list(U)
         a = next(r for r in rep if r["id"] == "sess-a")
-        check("meta event does not re-attribute (still alpha)",
-              a["stream_id"] == "alpha", a)
+        check("every event attributes — meta included (now meta)",
+              a["stream_id"] == "meta", a)
         await svc.log_event(U, "beta", "Beta shipped", ["y"], "sess-a",
                             create_stream={"title": "Beta"})
         a = (await svc.list(U, stream_id="beta"))
-        check("most recent non-meta event wins (now beta) + ?stream_id filter",
+        check("most recent event wins (now beta) + ?stream_id filter",
               len(a) == 1 and a[0]["id"] == "sess-a", a)
 
         # Fallback: no events -> working_paths match; else None.
@@ -214,8 +216,12 @@ async def main():
         md = await svc.index_md(U)
         check("index: active streams with state/next + recent activity",
               "Alpha work" in md and "Beta shipped" in md and "## Recent activity" in md, md)
-        check("index: meta stream excluded, closed gamma excluded",
-              "Ledger system" not in md and "Gamma" not in md, md)
+        check("index: no stream excluded — meta present, closed gamma absent",
+              "Ledger system" in md and "Gamma" not in md, md)
+
+        out = await svc.stream_close(U, "meta", "ordinary streams close", "sess-a")
+        check("meta closes like any other stream",
+              out["stream"]["closed_at"] is not None, out)
 
         # ── board ────────────────────────────────────────────────────────────
         b = await svc.board(U)

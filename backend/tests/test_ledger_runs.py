@@ -48,6 +48,9 @@ async def main():
         await svc.apply_event(U, "sess-a", "UserPromptSubmit", cwd="C:\\code\\botbeam", machine="m1")
         await svc.apply_event(U, "sess-b", "UserPromptSubmit", cwd="C:\\code\\other", machine="m1")
 
+        # The deliverable's stream must exist first — nothing is built in.
+        await svc.stream_put(U, "meta", {"title": "Ledger system"})
+
         # ── open: mint the deliverable in the same call ──────────────────────
         out = await svc.run_open(
             U, "sess-a", "cutting rev 21",

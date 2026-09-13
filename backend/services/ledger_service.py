@@ -20,9 +20,9 @@ RECORD — events, streams, runs, and deliverables, admitted by judgment (the
 skill). Events are immutable and exist only via log_event, an atomic
 composite: append the event, write the emitting session's liveness
 (invariant 9 — logging is a sign of life; turn_state untouched), apply the
-optional stream update. Streams are field-replaced, never merged; `meta` is a
-per-user built-in that never closes, never attributes, and stays out of the
-orientation index.
+optional stream update. Streams are field-replaced, never merged. There is no
+built-in stream and no slug the code knows by name — work on the ledger
+itself is a stream like any other, or it is not logged.
 
 Runs and deliverables (rev 21): a Run is a bounded stretch of work on exactly
 one Deliverable, declared at BOTH ends (invariant 10) — opened and closed by
@@ -64,7 +64,6 @@ logger = logging.getLogger("botbeam.ledger")
 SIGNALS = {"SessionStart", "UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"}
 
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
-META_STREAM = "meta"
 
 
 class LedgerError(ValueError):
@@ -354,8 +353,6 @@ class LedgerService:
             raise NotFound(f'Unknown session "{session_id}"')
 
         st = await self._get_stream(user_id, stream_id)
-        if st is None and stream_id == META_STREAM:
-            st = await self._ensure_meta(user_id, now)
         if st is None:
             if create_stream is None:
                 raise NotFound(f'Unknown stream "{stream_id}" — pass create_stream to create it')
@@ -418,8 +415,6 @@ class LedgerService:
             raise LedgerError("stream id must be a slug ([a-z0-9-]+)")
         now = datetime.utcnow()
         st = await self._get_stream(user_id, sid)
-        if st is None and sid == META_STREAM:
-            st = await self._ensure_meta(user_id, now)
         if st is None:
             st = LedgerStream(user_id=user_id, id=sid, since=now, updated=now)
             self.db.add(st)
@@ -436,8 +431,6 @@ class LedgerService:
         emitter is required with no exceptions (rev 19 ruling): closure events
         are events, and every event has exactly one emitter, whose liveness is
         written like any other emission (invariant 9)."""
-        if sid == META_STREAM:
-            raise Conflict("the meta stream never closes")
         st = await self._get_stream(user_id, sid)
         if st is None:
             raise NotFound(f'Unknown stream "{sid}"')
@@ -517,8 +510,6 @@ class LedgerService:
             if not name or not home or not stream_id:
                 raise LedgerError("create_deliverable needs name, home, and stream_id")
             st = await self._get_stream(user_id, stream_id)
-            if st is None and stream_id == META_STREAM:
-                st = await self._ensure_meta(user_id, now)
             if st is None:
                 # No nested create_stream — PUT /ledger/streams/{id} is the
                 # create path; one call beforehand (rev 21 ruling).
@@ -692,18 +683,16 @@ class LedgerService:
         return m.get(s.id)
 
     async def _attributions(self, user_id: int, rows: list[LedgerSession]) -> dict:
-        """sid → stream_id per the Book's rule: the stream of the session's most
-        recent non-meta event; else the most recently updated active stream
-        whose working_paths contain the workspace; else None. Writes into the
-        ledger itself never re-attribute (invariant 6) — meta is excluded."""
+        """sid → stream_id per the Book's rule: the stream of the session's
+        most recent event; else the most recently updated active stream whose
+        working_paths contain the workspace; else None (invariant 6)."""
         ids = [s.id for s in rows]
         if not ids:
             return {}
         evq = (
             select(LedgerEvent.session_id, LedgerEvent.stream_id)
             .where(LedgerEvent.user_id == user_id,
-                   LedgerEvent.session_id.in_(ids),
-                   LedgerEvent.stream_id != META_STREAM)
+                   LedgerEvent.session_id.in_(ids))
             .order_by(LedgerEvent.at.desc(), LedgerEvent.id.desc())
         )
         out: dict = {}
@@ -715,8 +704,7 @@ class LedgerService:
             stq = (
                 select(LedgerStream)
                 .where(LedgerStream.user_id == user_id,
-                       LedgerStream.closed_at.is_(None),
-                       LedgerStream.id != META_STREAM)
+                       LedgerStream.closed_at.is_(None))
                 .order_by(LedgerStream.updated.desc())
             )
             streams = (await self.db.execute(stq)).scalars().all()
@@ -774,10 +762,9 @@ class LedgerService:
 
     async def index_md(self, user_id: int) -> str:
         """GET /ledger/index — the one-screen orientation, service-rendered
-        markdown, injected at session start. The meta stream stays out of it."""
+        markdown, injected at session start."""
         now = datetime.utcnow()
-        streams = [r for r in await self.streams_list(user_id, status="active")
-                   if r["id"] != META_STREAM]
+        streams = await self.streams_list(user_id, status="active")
         events = await self.events_list(user_id, limit=8)
         lines = [f"# Ledger orientation — {now.date().isoformat()}", ""]
         lines.append("## Active streams")
@@ -880,12 +867,6 @@ class LedgerService:
             select(LedgerStream).where(LedgerStream.user_id == user_id, LedgerStream.id == sid)
         )).scalar_one_or_none()
 
-    async def _ensure_meta(self, user_id: int, now: datetime) -> LedgerStream:
-        """The built-in per-user meta stream, created lazily on first reference."""
-        st = LedgerStream(user_id=user_id, id=META_STREAM, title="Ledger system",
-                          since=now, updated=now)
-        self.db.add(st)
-        return st
 
     @staticmethod
     def _check_stream_fields(fields: dict) -> None:

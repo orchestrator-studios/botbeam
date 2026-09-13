@@ -148,10 +148,10 @@ class LedgerStream(Base):
     """A named thread of work under management — the record plane (Book rev 19).
 
     The slug is the identity the API speaks (`stream_id` everywhere), unique per
-    owner — hence the composite key. `meta` is a built-in stream per user
-    (created lazily): it never closes, never attributes sessions, and stays out
-    of the working index. Field-level replace only; the service never merges
-    prose. Staleness (fresh/aging/stale) is computed on read, never stored.
+    owner — hence the composite key. No slug is built-in or special — every
+    stream closes, attributes, and appears in the index alike. Field-level
+    replace only; the service never merges prose. Staleness (fresh/aging/stale)
+    is computed on read, never stored.
     """
     __tablename__ = "ledger_streams"
     __table_args__ = _UTF8MB4
