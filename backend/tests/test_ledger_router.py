@@ -113,8 +113,9 @@ check("GET /ledger/index -> text/markdown",
 
 r = c.get("/ledger/board")
 b = r.json()
-check("GET /ledger/board carries sessions+events+streams, no products",
-      r.status_code == 200 and set(b) == {"sessions", "events", "streams", "as_of"}, list(b))
+check("GET /ledger/board carries sessions+events+streams+deliverables",
+      r.status_code == 200
+      and set(b) == {"sessions", "events", "streams", "deliverables", "as_of"}, list(b))
 
 r = c.get("/ledger/search", params={"q": "shipped"})
 check("GET /ledger/search finds the event",

@@ -836,8 +836,9 @@ class LedgerService:
         first in STABLE order — first_seen ascending, so a card never moves
         while its session stays active and new activations append at the end —
         then inactive by last_event_at descending. Plus the record plane
-        (rev 19): recent events (rendered below the session sections) and the
-        active streams that label them. Products are absent by decision.
+        (rev 19): recent events and the active streams that label them, and
+        the live deliverables (rev 21) — rendered beside the streams, with
+        the events feed below.
         """
         now = datetime.utcnow()
         sessions = await self.list(user_id, relevant=True)   # last_event_at desc
@@ -848,6 +849,7 @@ class LedgerService:
             "sessions": active + inactive,
             "events": await self.events_list(user_id, limit=20),
             "streams": await self.streams_list(user_id, status="active"),
+            "deliverables": await self.deliverables_list(user_id, status="live"),
             "as_of": _iso(now),
         }
 

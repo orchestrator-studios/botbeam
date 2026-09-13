@@ -6,10 +6,11 @@ import type { LedgerBoard, LedgerSession } from '../types';
 // The board obeys the Ledger Book's session cheat sheet (woodshed docs/ledger/):
 // Rule 1 — it lists every session ever prompted, minus the ones you archived;
 // Rule 2 — the glyph: solid green = processing, +⚡ = run, ring = waiting.
-// Layout (rev 18–20): Active sessions are CARDS in a grid, in the server's
+// Layout (rev 18–21): Active sessions are CARDS in a grid, in the server's
 // stable order (first_seen asc — a card never moves while its session stays
 // active; only glyphs update). Inactive (dormant) sessions list below, newest
-// first, collapsible. Beneath both, Streams | Events side by side.
+// first, collapsible. Beneath both, Streams | Deliverables side by side,
+// then the Events feed full-width below the row.
 //
 // Visual language: each stream owns a color (hashed from its slug — stable
 // per entity, never repainted when the set changes) shown on its card edge,
@@ -182,6 +183,17 @@ export default function SessionsView() {
     (e) => !streamFilter || e.stream_id === streamFilter,
   );
 
+  const deliverables = board?.deliverables ?? [];
+  // deliverable_id → the session working it right now (its ⚡, joined
+  // client-side from the sessions already on the board).
+  const openRunByDeliverable = useMemo(() => {
+    const m: Record<string, LedgerSession> = {};
+    for (const s of sessions) {
+      if (s.open_run) m[s.open_run.deliverable_id] = s;
+    }
+    return m;
+  }, [sessions]);
+
   // The session card's stream dot — the third corner of the triangle.
   function streamDotFor(s: LedgerSession) {
     if (!s.stream_id) return null;
@@ -287,7 +299,8 @@ export default function SessionsView() {
           </>
         )}
 
-        {board && (streams.length > 0 || board.events.length > 0) && (
+        {board && (streams.length > 0 || deliverables.length > 0 || board.events.length > 0) && (
+          <>
           <div className="ledger-columns">
             <section className="ledger-section">
               <h2>Streams</h2>
@@ -323,51 +336,88 @@ export default function SessionsView() {
             </section>
 
             <section className="ledger-section">
-              <h2>
-                Events
-                {streamFilter && (
-                  <button className="ledger-filter-clear" onClick={() => setStreamFilter(null)}
-                    title="Clear the stream filter">
-                    <span className="stream-dot" style={{ background: streamColor(streamFilter) }} />
-                    {streamTitle[streamFilter] ?? prettySlug(streamFilter)} &times;
-                  </button>
-                )}
-              </h2>
-              {events.length === 0 ? (
-                <p className="ledger-empty">
-                  {streamFilter ? 'No events in this stream.' : 'No events logged yet.'}
-                </p>
+              <h2>Deliverables</h2>
+              {deliverables.length === 0 ? (
+                <p className="ledger-empty">No deliverables yet — one is born with the run that needs it.</p>
               ) : (
-                <ul className="ledger-feed">
-                  {events.map((e) => (
-                    <li key={e.id}
-                      className={`ledger-feed-line${e.stream_id === 'meta' ? ' meta' : ''}`}
-                      title={(e.body || []).join('\n')}
-                      onMouseEnter={() => setHover({
-                        stream: e.stream_id !== 'meta' ? e.stream_id : null,
-                        session: e.session_id,
-                      })}
-                      onMouseLeave={() => setHover({})}>
-                      {e.stream_id !== 'meta' && (
-                        <StreamTag slug={e.stream_id}
-                          title={streamTitle[e.stream_id] ?? prettySlug(e.stream_id)}
-                          onClick={() => setStreamFilter((f) => (f === e.stream_id ? null : e.stream_id))} />
-                      )}
-                      <span className="ledger-feed-headline">{e.headline}</span>
-                      <SessionChip s={e.session_id ? sessionById[e.session_id] : undefined} sid={e.session_id} />
-                      <span className="ledger-when" title={e.at}>{relTime(e.at)}</span>
-                    </li>
-                  ))}
+                <ul className="ledger-streams">
+                  {deliverables.map((d) => {
+                    const worker = openRunByDeliverable[d.id];
+                    return (
+                      <li key={d.id} className="ledger-deliverable-card"
+                        style={d.stream_id !== 'meta' ? { borderLeftColor: streamColor(d.stream_id) } : undefined}>
+                        <div className="ledger-stream-top">
+                          <span className="ledger-label">
+                            {d.stream_id !== 'meta' && (
+                              <span className="stream-dot"
+                                title={streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
+                                style={{ background: streamColor(d.stream_id) }} />
+                            )}
+                            {d.name}
+                          </span>
+                          <span className="ledger-when" title={d.updated || ''}>{relTime(d.updated)}</span>
+                        </div>
+                        {d.state && <span className="ledger-stream-state">{d.state}</span>}
+                        {d.home && <span className="ledger-deliverable-home">{d.home}</span>}
+                        {worker?.open_run && (
+                          <span className="ledger-run-line"
+                            title={`${worker.label || worker.id} is working this now`}>
+                            ⚡ {fmtElapsed(worker.open_run.started_at)} · {worker.open_run.intent}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>
           </div>
+
+          <section className="ledger-section">
+            <h2>
+              Events
+              {streamFilter && (
+                <button className="ledger-filter-clear" onClick={() => setStreamFilter(null)}
+                  title="Clear the stream filter">
+                  <span className="stream-dot" style={{ background: streamColor(streamFilter) }} />
+                  {streamTitle[streamFilter] ?? prettySlug(streamFilter)} &times;
+                </button>
+              )}
+            </h2>
+            {events.length === 0 ? (
+              <p className="ledger-empty">
+                {streamFilter ? 'No events in this stream.' : 'No events logged yet.'}
+              </p>
+            ) : (
+              <ul className="ledger-feed">
+                {events.map((e) => (
+                  <li key={e.id}
+                    className={`ledger-feed-line${e.stream_id === 'meta' ? ' meta' : ''}`}
+                    title={(e.body || []).join('\n')}
+                    onMouseEnter={() => setHover({
+                      stream: e.stream_id !== 'meta' ? e.stream_id : null,
+                      session: e.session_id,
+                    })}
+                    onMouseLeave={() => setHover({})}>
+                    {e.stream_id !== 'meta' && (
+                      <StreamTag slug={e.stream_id}
+                        title={streamTitle[e.stream_id] ?? prettySlug(e.stream_id)}
+                        onClick={() => setStreamFilter((f) => (f === e.stream_id ? null : e.stream_id))} />
+                    )}
+                    <span className="ledger-feed-headline">{e.headline}</span>
+                    <SessionChip s={e.session_id ? sessionById[e.session_id] : undefined} sid={e.session_id} />
+                    <span className="ledger-when" title={e.at}>{relTime(e.at)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          </>
         )}
 
         {board && (
           <p className="ledger-asof">
-            as of {board.as_of ? new Date(board.as_of).toLocaleTimeString() : ''} · work products
-            land in a later phase
+            as of {board.as_of ? new Date(board.as_of).toLocaleTimeString() : ''}
           </p>
         )}
       </div>

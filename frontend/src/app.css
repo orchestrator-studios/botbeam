@@ -2351,8 +2351,9 @@ table.content-table {
 .ledger-chevron { display: inline-block; transition: transform 0.15s; font-size: 0.9em; }
 .ledger-chevron.collapsed { transform: rotate(-90deg); }
 
-/* Streams | Events — the two-column row beneath the session sections
-   (rev 20 layout ruling). Stacks on narrow viewports, Streams first. */
+/* Streams | Deliverables — the two-column row beneath the session sections
+   (rev 21 layout: Events moved to a full-width section below the row).
+   Stacks on narrow viewports, Streams first. */
 .ledger-columns { display: grid; grid-template-columns: 5fr 7fr; gap: 18px; align-items: start; }
 .ledger-columns .ledger-section { min-width: 0; }
 @media (max-width: 760px) { .ledger-columns { grid-template-columns: 1fr; } }
@@ -2381,6 +2382,20 @@ table.content-table {
 }
 .ledger-stream-state { font-size: 0.85rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
 .ledger-stream-next { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Deliverables — what's being made (rev 21). Same card idiom as streams,
+   left edge in the owning stream's identity color (meta stays neutral), but
+   not clickable; the ⚡ line names the session working it right now. */
+.ledger-deliverable-card {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  padding: 11px 14px; border: 1px solid var(--border, rgba(128,128,128,0.25));
+  border-left-width: 3px; border-radius: 10px; background: var(--surface, rgba(128,128,128,0.06));
+}
+.ledger-deliverable-card .ledger-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ledger-deliverable-home {
+  font-size: 0.75rem; color: var(--text-muted); font-family: ui-monospace, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* The events feed — newest first; height-capped with its own scroll so the
    page doesn't grow unbounded as the feed fills. */

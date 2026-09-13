@@ -137,13 +137,28 @@ export interface LedgerStream {
   staleness: 'fresh' | 'aging' | 'stale' | null;  // computed — null when closed
 }
 
+// A deliverable (rev 21): a thing being made — a name plus exactly one home.
+// Persists and is advanced; the board shows the live ones.
+export interface LedgerDeliverable {
+  id: string;
+  at: string;
+  name: string;
+  home: string | null;
+  state: string | null;
+  status: 'live' | 'retired';
+  stream_id: string;
+  last_run_id: string | null;
+  updated: string | null;
+}
+
 // GET /ledger/board — the data structure the board view renders.
-// Sessions (ordering guaranteed server-side), recent events, active streams.
-// Products are absent by decision — deferred to a later phase.
+// Sessions (ordering guaranteed server-side), active streams beside the live
+// deliverables, and recent events below.
 export interface LedgerBoard {
   sessions: LedgerSession[];
   events: LedgerEvent[];
   streams: LedgerStream[];
+  deliverables: LedgerDeliverable[];
   as_of: string;
 }
 
