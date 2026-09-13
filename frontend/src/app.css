@@ -2384,14 +2384,20 @@ table.content-table {
 .ledger-stream-next { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Deliverables — what's being made (rev 21). Same card idiom as streams,
-   left edge in the owning stream's identity color (meta stays neutral), but
-   not clickable; the ⚡ line names the session working it right now. */
+   left edge in the owning stream's identity color, and the same linkage
+   language as events: a stream pill (click filters the feed), a session
+   chip for whoever is mid-run on it, and hover lights the stream + session
+   cards. In turn the card lights when its stream is hovered elsewhere and
+   outlines while its stream is the feed filter. */
 .ledger-deliverable-card {
   display: flex; flex-direction: column; gap: 3px; min-width: 0;
   padding: 11px 14px; border: 1px solid var(--border, rgba(128,128,128,0.25));
   border-left-width: 3px; border-radius: 10px; background: var(--surface, rgba(128,128,128,0.06));
 }
-.ledger-deliverable-card .ledger-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ledger-deliverable-card:hover, .ledger-deliverable-card.hl { border-color: var(--accent); border-left-color: inherit; }
+.ledger-deliverable-card.selected { outline: 1px solid var(--accent); }
+.ledger-deliverable-links { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 2px; }
+.ledger-deliverable-links .ledger-run-line { flex: 1; margin-top: 0; }
 .ledger-deliverable-home {
   font-size: 0.75rem; color: var(--text-muted); font-family: ui-monospace, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

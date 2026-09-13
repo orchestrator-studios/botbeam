@@ -14,12 +14,13 @@ import type { LedgerBoard, LedgerSession } from '../types';
 //
 // Visual language: each stream owns a color (hashed from its slug — stable
 // per entity, never repainted when the set changes) shown on its card edge,
-// on every event's stream pill, and as a dot on attributed session cards.
-// Identity is never color-alone — the stream title always rides with the
-// swatch. Events also carry their emitting session as a chip. meta events
-// render stream-less (bookkeeping, not a thread). Statuses arrive
-// stored/computed from the service; this view computes nothing and never
-// re-sorts.
+// on every event's and deliverable's stream pill, and as a dot on attributed
+// session cards. Identity is never color-alone — the stream title always
+// rides with the swatch. Events and deliverables carry their session as a
+// chip (emitter / the one mid-run). meta EVENTS render stream-less
+// (bookkeeping, not a thread) — meta deliverables do not: a thing being made
+// always shows its home stream. Statuses arrive stored/computed from the
+// service; this view computes nothing and never re-sorts.
 
 // Categorical palette (dataviz reference, dark column) — validated against
 // this app's surface: 8/8 pass lightness band, chroma floor, CVD separation,
@@ -344,27 +345,29 @@ export default function SessionsView() {
                   {deliverables.map((d) => {
                     const worker = openRunByDeliverable[d.id];
                     return (
-                      <li key={d.id} className="ledger-deliverable-card"
-                        style={d.stream_id !== 'meta' ? { borderLeftColor: streamColor(d.stream_id) } : undefined}>
+                      <li key={d.id}
+                        className={`ledger-deliverable-card${hover.stream === d.stream_id ? ' hl' : ''}${streamFilter === d.stream_id ? ' selected' : ''}`}
+                        style={{ borderLeftColor: streamColor(d.stream_id) }}
+                        onMouseEnter={() => setHover({ stream: d.stream_id, session: worker?.id })}
+                        onMouseLeave={() => setHover({})}>
                         <div className="ledger-stream-top">
-                          <span className="ledger-label">
-                            {d.stream_id !== 'meta' && (
-                              <span className="stream-dot"
-                                title={streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
-                                style={{ background: streamColor(d.stream_id) }} />
-                            )}
-                            {d.name}
-                          </span>
+                          <span className="ledger-label">{d.name}</span>
                           <span className="ledger-when" title={d.updated || ''}>{relTime(d.updated)}</span>
                         </div>
                         {d.state && <span className="ledger-stream-state">{d.state}</span>}
+                        <div className="ledger-deliverable-links">
+                          <StreamTag slug={d.stream_id}
+                            title={streamTitle[d.stream_id] ?? prettySlug(d.stream_id)}
+                            onClick={() => setStreamFilter((f) => (f === d.stream_id ? null : d.stream_id))} />
+                          {worker?.open_run && (
+                            <span className="ledger-run-line"
+                              title={`${worker.label || worker.id} is working this now`}>
+                              ⚡ {fmtElapsed(worker.open_run.started_at)} · {worker.open_run.intent}
+                            </span>
+                          )}
+                          {worker && <SessionChip s={worker} sid={worker.id} />}
+                        </div>
                         {d.home && <span className="ledger-deliverable-home">{d.home}</span>}
-                        {worker?.open_run && (
-                          <span className="ledger-run-line"
-                            title={`${worker.label || worker.id} is working this now`}>
-                            ⚡ {fmtElapsed(worker.open_run.started_at)} · {worker.open_run.intent}
-                          </span>
-                        )}
                       </li>
                     );
                   })}
