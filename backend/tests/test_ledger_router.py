@@ -112,6 +112,22 @@ r = c.post("/ledger/streams/alpha/reopen", json={"reason": "again", "session_id"
 check("reopen an open stream -> 409 {error:conflict}",
       r.status_code == 409 and r.json()["detail"]["error"] == "conflict", r.text)
 
+# ── the emitter is a place (invariant 11) over the wire ──────────────────────
+r = c.post("/ledger/events", json={
+    "stream_id": "alpha", "headline": "From the board", "body": ["x"], "emitter": "board"})
+check("board-emitted event -> 201, emitter_kind=board, session null",
+      r.status_code == 201 and r.json()["event"]["emitter_kind"] == "board"
+      and r.json()["event"]["session_id"] is None and r.json()["session"] is None, r.text)
+r = c.post("/ledger/events", json={
+    "stream_id": "alpha", "headline": "Two places", "body": ["x"],
+    "session_id": "s1", "emitter": "board"})
+check("naming both places -> 422", r.status_code == 422, r.text)
+r = c.post("/ledger/streams/alpha/close", json={"reason": "board test", "emitter": "board"})
+check("board-emitted close -> 200, closure event names the board",
+      r.status_code == 200 and r.json()["closure_event"]["emitter_kind"] == "board", r.text)
+r = c.post("/ledger/streams/alpha/reopen", json={"reason": "board test", "emitter": "board"})
+check("board-emitted reopen -> 200", r.status_code == 200, r.text)
+
 r = c.get("/ledger/index")
 check("GET /ledger/index -> text/markdown",
       r.status_code == 200 and r.headers["content-type"].startswith("text/markdown")

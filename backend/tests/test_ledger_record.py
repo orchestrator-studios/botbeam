@@ -241,6 +241,22 @@ async def main():
         check("data endpoint still serves the closed stream's history",
               any(e["stream_id"] == "meta" for e in await svc.events_list(U)))
 
+        # ── the emitter is a place (invariant 11) ────────────────────────────
+        await rejects("neither session_id nor emitter -> 422", LedgerError,
+                      svc.log_event(U, "alpha", "ok", ["x"]))
+        await rejects("both session_id and emitter=board -> 422", LedgerError,
+                      svc.log_event(U, "alpha", "ok", ["x"], "sess-a", emitter="board"))
+        await rejects("emitter other than board -> 422", LedgerError,
+                      svc.log_event(U, "alpha", "ok", ["x"], emitter="operator"))
+        out = await svc.log_event(U, "alpha", "Board says so", ["x"], emitter="board")
+        check("board-emitted event: kind stored, no session, session None in response",
+              out["event"]["emitter_kind"] == "board"
+              and out["event"]["session_id"] is None
+              and out["session"] is None, out)
+        check("session-emitted events carry kind=session in reads",
+              all(e["emitter_kind"] == "session"
+                  for e in await svc.events_list(U, session_id="sess-a")))
+
         # ── reopen: the mirror of close ──────────────────────────────────────
         await rejects("reopen an open stream -> 409", Conflict,
                       svc.stream_reopen(U, "alpha", "why", "sess-a"))
@@ -255,6 +271,15 @@ async def main():
         b = await svc.board(U)
         check("reopened stream brings its events back to the board",
               any(e["stream_id"] == "meta" for e in b["events"]), b["events"])
+
+        # ── board-emitted close/reopen (the dashboard buttons) ───────────────
+        out = await svc.stream_close(U, "meta", "from the dashboard", emitter="board")
+        check("board-emitted close: closure event names the board, no session",
+              out["closure_event"]["emitter_kind"] == "board"
+              and out["closure_event"]["session_id"] is None, out)
+        out = await svc.stream_reopen(U, "meta", "back again", emitter="board")
+        check("board-emitted reopen mirrors it",
+              out["reopen_event"]["emitter_kind"] == "board", out)
 
         # ── reset clears all three stores ────────────────────────────────────
         await svc.reset(U)

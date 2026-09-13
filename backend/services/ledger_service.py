@@ -18,9 +18,11 @@ per transition (Book rev 17 + 18) — nothing lifecycle is derived at read time:
 
 RECORD — events, streams, runs, and deliverables, admitted by judgment (the
 skill). Events are immutable and exist only via log_event, an atomic
-composite: append the event, write the emitting session's liveness
+composite: append the event, write a session emitter's liveness
 (invariant 9 — logging is a sign of life; turn_state untouched), apply the
-optional stream update. Streams are field-replaced, never merged. There is no
+optional stream update. Every event names its emitter, and an emitter is a
+place (invariant 11): a session, or the BotBeam board — declared by the
+caller, never inferred from the credential. Streams are field-replaced, never merged. There is no
 built-in stream and no slug the code knows by name — work on the ledger
 itself is a stream like any other, or it is not logged.
 
@@ -203,8 +205,31 @@ class LedgerService:
             "stream_id": e.stream_id,
             "headline": e.headline,
             "body": e.body or [],
+            "emitter_kind": e.emitter_kind,
             "session_id": e.session_id,
         }
+
+    # ── the emitter is a place (invariant 11) ────────────────────────────────
+
+    @staticmethod
+    def _resolve_emitter(session_id: Optional[str], emitter: Optional[str]) -> str:
+        """Exactly one place is named, explicitly — a session_id, or
+        emitter="board". Never inferred from the credential: the browser and
+        every agent authenticate as the same user, so inference is a guess.
+        Returns the emitter_kind to store."""
+        if emitter not in (None, "board"):
+            raise LedgerError('emitter must be "board" when given')
+        if emitter == "board" and session_id:
+            raise LedgerError('session_id and emitter="board" are mutually exclusive — name one place')
+        if emitter != "board" and not session_id:
+            raise LedgerError('an emitter is required: session_id, or emitter="board"')
+        return "board" if emitter == "board" else "session"
+
+    async def _emitting_session(self, user_id: int, session_id: str) -> LedgerSession:
+        s = await self.db.get(LedgerSession, session_id)
+        if s is None or s.user_id != user_id:
+            raise NotFound(f'Unknown session "{session_id}"')
+        return s
 
     # ── signals (telemetry plane) ────────────────────────────────────────────
 
@@ -321,15 +346,18 @@ class LedgerService:
 
     async def log_event(
         self, user_id: int,
-        stream_id: str, headline: str, body: list[str], session_id: str,
+        stream_id: str, headline: str, body: list[str],
+        session_id: Optional[str] = None,
         stream_update: Optional[dict] = None,
         create_stream: Optional[dict] = None,
+        emitter: Optional[str] = None,
     ) -> dict:
         """POST /ledger/events — one atomic transaction, three parts: append
-        the immutable event; write the emitting session's liveness (invariant
-        9 — turn_state untouched); apply the stream update / creation. All
-        validation precedes every write, and one commit lands the composite —
-        it commits entirely or not at all.
+        the immutable event; for a session emitter, write its liveness
+        (invariant 9 — turn_state untouched; the board is a surface with no
+        liveness row); apply the stream update / creation. All validation
+        precedes every write, and one commit lands the composite — it commits
+        entirely or not at all.
         """
         now = datetime.utcnow()
 
@@ -341,16 +369,13 @@ class LedgerService:
         if not isinstance(body, list) or not (1 <= len(body) <= 4) \
                 or not all(isinstance(b, str) and b.strip() for b in body):
             raise LedgerError("body must be 1-4 non-empty markdown strings")
-        if not session_id:
-            raise LedgerError("session_id is required — every event has exactly one emitter")
+        kind = self._resolve_emitter(session_id, emitter)
         if not SLUG_RE.match(stream_id or ""):
             raise LedgerError("stream_id must be a slug ([a-z0-9-]+)")
         if stream_update:
             self._check_stream_fields(stream_update)
 
-        s = await self.db.get(LedgerSession, session_id)
-        if s is None or s.user_id != user_id:
-            raise NotFound(f'Unknown session "{session_id}"')
+        s = await self._emitting_session(user_id, session_id) if kind == "session" else None
 
         st = await self._get_stream(user_id, stream_id)
         if st is None:
@@ -370,24 +395,26 @@ class LedgerService:
         ev = LedgerEvent(
             id=f"ev_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
             stream_id=stream_id, headline=headline.strip(), body=body,
-            session_id=session_id,
+            emitter_kind=kind, session_id=session_id,
         )
         self.db.add(ev)
 
-        self._liveness(s, now)   # invariant 9: emitting is a sign of life
+        if s is not None:
+            self._liveness(s, now)   # invariant 9: session emission is a sign of life
 
         if stream_update:
             self._apply_stream_fields(st, stream_update)
         st.updated = now
 
         await self.db.commit()
-        await self.db.refresh(s)
+        if s is not None:
+            await self.db.refresh(s)
         await self.db.refresh(st)
-        logger.info("ledger event logged (stream=%s, session=%s, user=%s)",
-                    stream_id, session_id[:6], user_id)
+        logger.info("ledger event logged (stream=%s, emitter=%s, user=%s)",
+                    stream_id, session_id[:6] if session_id else "board", user_id)
         return {
             "event": self._event_repr(ev),
-            "session": await self._repr_one(user_id, s, now),
+            "session": await self._repr_one(user_id, s, now) if s is not None else None,
             "stream": self._stream_repr(st, now),
         }
 
@@ -426,65 +453,65 @@ class LedgerService:
         await self.db.refresh(st)
         return self._stream_repr(st, now)
 
-    async def stream_close(self, user_id: int, sid: str, reason: str, session_id: str) -> dict:
+    async def stream_close(self, user_id: int, sid: str, reason: str,
+                           session_id: Optional[str] = None,
+                           emitter: Optional[str] = None) -> dict:
         """Close a stream and log the closure event — one transaction. The
-        emitter is required with no exceptions (rev 19 ruling): closure events
-        are events, and every event has exactly one emitter, whose liveness is
-        written like any other emission (invariant 9)."""
+        emitter is required with no exceptions: closure events are events,
+        and every event names its place (invariant 11) — a session (whose
+        liveness is written, invariant 9) or the board."""
         st = await self._get_stream(user_id, sid)
         if st is None:
             raise NotFound(f'Unknown stream "{sid}"')
         if st.closed_at is not None:
             raise Conflict(f'Stream "{sid}" is already closed')
-        if not session_id:
-            raise LedgerError("session_id is required — every event has exactly one emitter")
-        s = await self.db.get(LedgerSession, session_id)
-        if s is None or s.user_id != user_id:
-            raise NotFound(f'Unknown session "{session_id}"')
+        kind = self._resolve_emitter(session_id, emitter)
+        s = await self._emitting_session(user_id, session_id) if kind == "session" else None
         now = datetime.utcnow()
         st.closed_at = now
         st.updated = now
         ev = LedgerEvent(
             id=f"ev_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
             stream_id=sid, headline=f'Stream "{sid}" closed — {reason or "done"}',
-            body=[reason or "closed"], session_id=session_id,
+            body=[reason or "closed"], emitter_kind=kind, session_id=session_id,
         )
         self.db.add(ev)
-        self._liveness(s, now)
+        if s is not None:
+            self._liveness(s, now)
         await self.db.commit()
         await self.db.refresh(st)
-        logger.info("ledger stream closed (%s, user=%s)", sid, user_id)
+        logger.info("ledger stream closed (%s, by=%s, user=%s)", sid, kind, user_id)
         return {"stream": self._stream_repr(st, now), "closure_event": self._event_repr(ev)}
 
-    async def stream_reopen(self, user_id: int, sid: str, reason: str, session_id: str) -> dict:
+    async def stream_reopen(self, user_id: int, sid: str, reason: str,
+                            session_id: Optional[str] = None,
+                            emitter: Optional[str] = None) -> dict:
         """Reopen a closed stream and log the reopen event — one transaction,
-        the mirror of stream_close. The record keeps both the closure and the
-        reopen; nothing is erased. The stream returns to the board and brings
-        its events and deliverables back with it (the board invariant does
-        that for free)."""
+        the mirror of stream_close, same emitter rule (invariant 11). The
+        record keeps both the closure and the reopen; nothing is erased. The
+        stream returns to the board and brings its events and deliverables
+        back with it (the board invariant does that for free)."""
         st = await self._get_stream(user_id, sid)
         if st is None:
             raise NotFound(f'Unknown stream "{sid}"')
         if st.closed_at is None:
             raise Conflict(f'Stream "{sid}" is not closed')
-        if not session_id:
-            raise LedgerError("session_id is required — every event has exactly one emitter")
-        s = await self.db.get(LedgerSession, session_id)
-        if s is None or s.user_id != user_id:
-            raise NotFound(f'Unknown session "{session_id}"')
+        kind = self._resolve_emitter(session_id, emitter)
+        s = await self._emitting_session(user_id, session_id) if kind == "session" else None
         now = datetime.utcnow()
         st.closed_at = None
         st.updated = now
         ev = LedgerEvent(
             id=f"ev_{uuid.uuid4().hex[:16]}", user_id=user_id, at=now,
             stream_id=sid, headline=f'Stream "{sid}" reopened — {reason or "back on the board"}',
-            body=[reason or "reopened"], session_id=session_id,
+            body=[reason or "reopened"], emitter_kind=kind, session_id=session_id,
         )
         self.db.add(ev)
-        self._liveness(s, now)
+        if s is not None:
+            self._liveness(s, now)
         await self.db.commit()
         await self.db.refresh(st)
-        logger.info("ledger stream reopened (%s, user=%s)", sid, user_id)
+        logger.info("ledger stream reopened (%s, by=%s, user=%s)", sid, kind, user_id)
         return {"stream": self._stream_repr(st, now), "reopen_event": self._event_repr(ev)}
 
     async def streams_list(self, user_id: int, status: str = "active") -> list[dict]:

@@ -88,12 +88,14 @@ class StreamUpdate(BaseModel):
 
 class LogEvent(BaseModel):
     """POST /ledger/events body. extra='forbid' also rejects the deferred
-    `product` block with a 422, per the Book."""
+    `product` block with a 422, per the Book. The emitter is a place
+    (invariant 11): session_id, or emitter="board" — exactly one."""
     model_config = ConfigDict(extra="forbid")
     stream_id: str
     headline: str
     body: list[str]
-    session_id: str
+    session_id: Optional[str] = None
+    emitter: Optional[str] = None
     stream_update: Optional[StreamUpdate] = None
     create_stream: Optional[CreateStream] = None
 
@@ -122,17 +124,19 @@ class RunClose(BaseModel):
 
 
 class StreamClose(BaseModel):
+    """The closure event is an event, and every event names its place
+    (invariant 11): session_id, or emitter="board" — exactly one."""
     model_config = ConfigDict(extra="forbid")
     reason: str = ""
-    # Required (rev 19 ruling): the closure event is an event, and every event
-    # has exactly one emitter — no exceptions.
-    session_id: str
+    session_id: Optional[str] = None
+    emitter: Optional[str] = None
 
 
 class StreamReopen(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: str = ""
-    session_id: str
+    session_id: Optional[str] = None
+    emitter: Optional[str] = None
 
 
 def _svc(db: AsyncSession) -> LedgerService:
@@ -163,7 +167,7 @@ async def log_event(
         out = await _svc(db).log_event(
             user.user_id,
             stream_id=body.stream_id, headline=body.headline, body=body.body,
-            session_id=body.session_id,
+            session_id=body.session_id, emitter=body.emitter,
             stream_update=body.stream_update.model_dump(exclude_unset=True) if body.stream_update else None,
             create_stream=body.create_stream.model_dump(exclude_unset=True) if body.create_stream else None,
         )
@@ -206,7 +210,9 @@ async def close_stream(
     user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        out = await _svc(db).stream_close(user.user_id, sid, body.reason, session_id=body.session_id)
+        out = await _svc(db).stream_close(
+            user.user_id, sid, body.reason,
+            session_id=body.session_id, emitter=body.emitter)
     except ValueError as e:
         await db.rollback()
         raise _http(e)
@@ -220,7 +226,9 @@ async def reopen_stream(
     user=Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        out = await _svc(db).stream_reopen(user.user_id, sid, body.reason, session_id=body.session_id)
+        out = await _svc(db).stream_reopen(
+            user.user_id, sid, body.reason,
+            session_id=body.session_id, emitter=body.emitter)
     except ValueError as e:
         await db.rollback()
         raise _http(e)
